@@ -78,6 +78,12 @@ fn isAmbiguous(c: u8) bool {
     return false;
 }
 
+fn randomChar(chars: []const u8) u8 {
+    var rand: [1]u8 = undefined;
+    std.crypto.random.bytes(&rand);
+    return chars[rand[0] % chars.len];
+}
+
 fn ensureCharacterCategories(password: []u8, options: GeneratorOptions, charset: []const u8) !void {
     _ = charset;
 
@@ -98,33 +104,25 @@ fn ensureCharacterCategories(password: []u8, options: GeneratorOptions, charset:
 
     if (options.uppercase and pos_idx < positions.len) {
         const chars = if (options.exclude_ambiguous) "ABCDEFGHJKMNPQRSTUVWXYZ" else "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        var rand: [1]u8 = undefined;
-        std.crypto.random.bytes(&rand);
-        password[positions[pos_idx]] = chars[rand[0] % chars.len];
+        password[positions[pos_idx]] = randomChar(chars);
         pos_idx += 1;
     }
 
     if (options.lowercase and pos_idx < positions.len) {
         const chars = if (options.exclude_ambiguous) "abcdefghjkmnpqrstuvwxyz" else "abcdefghijklmnopqrstuvwxyz";
-        var rand: [1]u8 = undefined;
-        std.crypto.random.bytes(&rand);
-        password[positions[pos_idx]] = chars[rand[0] % chars.len];
+        password[positions[pos_idx]] = randomChar(chars);
         pos_idx += 1;
     }
 
     if (options.digits and pos_idx < positions.len) {
         const chars = if (options.exclude_ambiguous) "23456789" else "0123456789";
-        var rand: [1]u8 = undefined;
-        std.crypto.random.bytes(&rand);
-        password[positions[pos_idx]] = chars[rand[0] % chars.len];
+        password[positions[pos_idx]] = randomChar(chars);
         pos_idx += 1;
     }
 
     if (options.symbols and pos_idx < positions.len) {
         const chars = options.custom_symbols orelse default_symbols;
-        var rand: [1]u8 = undefined;
-        std.crypto.random.bytes(&rand);
-        password[positions[pos_idx]] = chars[rand[0] % chars.len];
+        password[positions[pos_idx]] = randomChar(chars);
         pos_idx += 1;
     }
 }
