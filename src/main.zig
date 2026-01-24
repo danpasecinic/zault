@@ -3,7 +3,13 @@ const builtin = @import("builtin");
 
 const cli = @import("cli/root.zig");
 const core = @import("core/vault.zig");
+const entry = @import("core/entry.zig");
 const memory = @import("memory/secure_allocator.zig");
+const argon2 = @import("crypto/argon2.zig");
+const xchacha = @import("crypto/xchacha.zig");
+const totp = @import("services/totp.zig");
+const generator = @import("services/generator.zig");
+const clipboard = @import("services/clipboard.zig");
 
 pub const std_options: std.Options = .{
     .log_level = if (builtin.mode == .Debug) .debug else .info,
@@ -131,6 +137,18 @@ fn showVersion() !void {
 }
 
 test "basic command parsing" {
-    // Basic smoke test
     try showVersion();
+}
+
+test {
+    @import("std").testing.refAllDecls(@This());
+    _ = cli;
+    _ = core;
+    _ = entry;
+    _ = memory;
+    _ = argon2;
+    _ = xchacha;
+    _ = totp;
+    _ = generator;
+    _ = clipboard;
 }

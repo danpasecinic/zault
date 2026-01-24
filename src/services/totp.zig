@@ -21,7 +21,10 @@ pub fn generate(
     algorithm: Algorithm,
 ) !u32 {
     const decoded_secret = try base32Decode(std.heap.page_allocator, secret);
-    defer std.heap.page_allocator.free(decoded_secret);
+    defer {
+        @memset(decoded_secret, 0);
+        std.heap.page_allocator.free(decoded_secret);
+    }
 
     const counter: u64 = @intCast(@divFloor(time, period));
 
@@ -49,27 +52,34 @@ fn hotp(secret: []const u8, counter: u64, digits: u8, algorithm: Algorithm) u32 
     std.mem.writeInt(u64, &counter_bytes, counter, .big);
 
     var hmac_result: [64]u8 = undefined;
+    defer @memset(&hmac_result, 0);
     var hmac_len: usize = 0;
 
     switch (algorithm) {
         .sha1 => {
-            var hmac = std.crypto.auth.hmac.HmacSha1.init(secret);
+            const HmacSha1 = std.crypto.auth.hmac.HmacSha1;
+            var hmac = HmacSha1.init(secret);
             hmac.update(&counter_bytes);
-            const result = hmac.finalResult();
+            var result: [HmacSha1.mac_length]u8 = undefined;
+            hmac.final(&result);
             @memcpy(hmac_result[0..result.len], &result);
             hmac_len = result.len;
         },
         .sha256 => {
-            var hmac = std.crypto.auth.hmac.sha2.HmacSha256.init(secret);
+            const HmacSha256 = std.crypto.auth.hmac.sha2.HmacSha256;
+            var hmac = HmacSha256.init(secret);
             hmac.update(&counter_bytes);
-            const result = hmac.finalResult();
+            var result: [HmacSha256.mac_length]u8 = undefined;
+            hmac.final(&result);
             @memcpy(hmac_result[0..result.len], &result);
             hmac_len = result.len;
         },
         .sha512 => {
-            var hmac = std.crypto.auth.hmac.sha2.HmacSha512.init(secret);
+            const HmacSha512 = std.crypto.auth.hmac.sha2.HmacSha512;
+            var hmac = HmacSha512.init(secret);
             hmac.update(&counter_bytes);
-            const result = hmac.finalResult();
+            var result: [HmacSha512.mac_length]u8 = undefined;
+            hmac.final(&result);
             @memcpy(hmac_result[0..result.len], &result);
             hmac_len = result.len;
         },
@@ -185,7 +195,7 @@ fn base32Decode(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
 test "base32 decode" {
     const allocator = std.testing.allocator;
 
-    const decoded = try base32Decode(allocator, "JBSWY3DPEHPK3PXP");
+    const decoded = try base32Decode(allocator, "JBSWY3DPEE");
     defer allocator.free(decoded);
 
     try std.testing.expectEqualStrings("Hello!", decoded);
