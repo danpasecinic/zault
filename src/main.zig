@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const build_options = @import("build_options");
 
 const cli = @import("cli/root.zig");
+const terminal = @import("cli/terminal.zig");
 const core = @import("core/vault.zig");
 const config = @import("core/config.zig");
 const entry = @import("core/entry.zig");
@@ -42,12 +43,11 @@ pub fn main() !void {
 }
 
 fn runCommand(allocator: std.mem.Allocator, cfg: config.Config, command: []const u8, args: []const []const u8) !void {
-    _ = allocator;
     _ = cfg;
     _ = args;
 
     if (std.mem.eql(u8, command, "init")) {
-        try cmdInit();
+        try cmdInit(allocator);
     } else if (std.mem.eql(u8, command, "add")) {
         try cmdAdd();
     } else if (std.mem.eql(u8, command, "get")) {
@@ -72,9 +72,61 @@ fn runCommand(allocator: std.mem.Allocator, cfg: config.Config, command: []const
     }
 }
 
-fn cmdInit() !void {
-    std.debug.print("Initializing new vault...\n", .{});
-    std.debug.print("Not yet implemented\n", .{});
+fn cmdInit(allocator: std.mem.Allocator) !void {
+    const vault_path = core.getDefaultVaultDataPath(allocator) catch {
+        std.debug.print("Error: Could not determine vault path\n", .{});
+        return;
+    };
+    defer allocator.free(vault_path);
+
+    if (std.fs.cwd().access(vault_path, .{})) |_| {
+        std.debug.print("Vault already exists at {s}\n", .{vault_path});
+        std.debug.print("Use 'zault delete-vault' to remove it first.\n", .{});
+        return;
+    } else |_| {}
+
+    std.debug.print("Creating new vault at {s}\n", .{vault_path});
+
+    const password = terminal.readPassword(allocator, "Enter master password: ") catch {
+        std.debug.print("Error: Could not read password\n", .{});
+        return;
+    };
+    defer {
+        memory.secureZero(password);
+        allocator.free(password);
+    }
+
+    if (password.len < 8) {
+        std.debug.print("Error: Password must be at least 8 characters\n", .{});
+        return;
+    }
+
+    const confirm_pw = terminal.readPassword(allocator, "Confirm master password: ") catch {
+        std.debug.print("Error: Could not read password\n", .{});
+        return;
+    };
+    defer {
+        memory.secureZero(confirm_pw);
+        allocator.free(confirm_pw);
+    }
+
+    if (!std.mem.eql(u8, password, confirm_pw)) {
+        std.debug.print("Error: Passwords do not match\n", .{});
+        return;
+    }
+
+    var vault = core.Vault.create(allocator, vault_path, password) catch {
+        std.debug.print("Error: Could not create vault\n", .{});
+        return;
+    };
+    defer vault.deinit();
+
+    vault.save() catch {
+        std.debug.print("Error: Could not save vault\n", .{});
+        return;
+    };
+
+    std.debug.print("Vault created successfully.\n", .{});
 }
 
 fn cmdAdd() !void {
