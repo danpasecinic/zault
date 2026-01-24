@@ -69,10 +69,10 @@ pub const SecureAllocator = struct {
     }
 };
 
-// Zeros memory with a compiler fence to prevent optimization
+// Zeros memory using volatile writes to prevent optimization
 pub fn secureZero(buf: []u8) void {
-    @memset(buf, 0);
-    std.atomic.compilerFence(.seq_cst);
+    const volatile_buf: []volatile u8 = @ptrCast(buf);
+    std.crypto.secureZero(u8, volatile_buf);
 }
 
 fn lockMemory(ptr: [*]u8, len: usize) !void {

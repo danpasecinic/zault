@@ -14,13 +14,13 @@ const default_symbols = "!@#$%^&*()_+-=[]{}|;:,.<>?";
 const ambiguous_chars = "0O1lI";
 
 pub fn generate(allocator: std.mem.Allocator, options: GeneratorOptions) ![]u8 {
-    var charset = std.ArrayList(u8).init(allocator);
-    defer charset.deinit();
+    var charset: std.ArrayList(u8) = .empty;
+    defer charset.deinit(allocator);
 
     if (options.uppercase) {
         for ("ABCDEFGHIJKLMNOPQRSTUVWXYZ") |c| {
             if (!options.exclude_ambiguous or !isAmbiguous(c)) {
-                try charset.append(c);
+                try charset.append(allocator, c);
             }
         }
     }
@@ -28,7 +28,7 @@ pub fn generate(allocator: std.mem.Allocator, options: GeneratorOptions) ![]u8 {
     if (options.lowercase) {
         for ("abcdefghijklmnopqrstuvwxyz") |c| {
             if (!options.exclude_ambiguous or !isAmbiguous(c)) {
-                try charset.append(c);
+                try charset.append(allocator, c);
             }
         }
     }
@@ -36,7 +36,7 @@ pub fn generate(allocator: std.mem.Allocator, options: GeneratorOptions) ![]u8 {
     if (options.digits) {
         for ("0123456789") |c| {
             if (!options.exclude_ambiguous or !isAmbiguous(c)) {
-                try charset.append(c);
+                try charset.append(allocator, c);
             }
         }
     }
@@ -44,7 +44,7 @@ pub fn generate(allocator: std.mem.Allocator, options: GeneratorOptions) ![]u8 {
     if (options.symbols) {
         const symbols = options.custom_symbols orelse default_symbols;
         for (symbols) |c| {
-            try charset.append(c);
+            try charset.append(allocator, c);
         }
     }
 
@@ -131,22 +131,22 @@ pub fn generatePassphrase(
         "zebra",    "anchor", "beacon",   "castle", "diamond",
     };
 
-    var result = std.ArrayList(u8).init(allocator);
-    errdefer result.deinit();
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
 
     for (0..word_count) |i| {
         if (i > 0) {
-            try result.append(separator);
+            try result.append(allocator, separator);
         }
 
         var random_bytes: [1]u8 = undefined;
         std.crypto.random.bytes(&random_bytes);
         const word_idx = random_bytes[0] % words.len;
 
-        try result.appendSlice(words[word_idx]);
+        try result.appendSlice(allocator, words[word_idx]);
     }
 
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }
 
 pub fn calculateEntropy(password: []const u8) f64 {
