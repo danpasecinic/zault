@@ -123,12 +123,12 @@ pub fn generatePassphrase(
     separator: u8,
 ) ![]u8 {
     const words = [_][]const u8{
-        "apple",   "banana", "cherry",  "dragon", "eagle",
-        "falcon",  "garden", "hammer",  "island", "jungle",
-        "kettle",  "lemon",  "mountain","nebula", "ocean",
-        "planet",  "quartz", "river",   "sunset", "tiger",
-        "umbrella","violet", "whisper", "xenon",  "yellow",
-        "zebra",   "anchor", "beacon",  "castle", "diamond",
+        "apple",    "banana", "cherry",   "dragon", "eagle",
+        "falcon",   "garden", "hammer",   "island", "jungle",
+        "kettle",   "lemon",  "mountain", "nebula", "ocean",
+        "planet",   "quartz", "river",    "sunset", "tiger",
+        "umbrella", "violet", "whisper",  "xenon",  "yellow",
+        "zebra",    "anchor", "beacon",   "castle", "diamond",
     };
 
     var result = std.ArrayList(u8).init(allocator);
