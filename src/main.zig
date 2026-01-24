@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 
 const cli = @import("cli/root.zig");
 const core = @import("core/vault.zig");
+const config = @import("core/config.zig");
 const entry = @import("core/entry.zig");
 const memory = @import("memory/secure_allocator.zig");
 const argon2 = @import("crypto/argon2.zig");
@@ -20,21 +21,28 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    const cfg = config.Config.load(allocator) catch config.Config{};
+
+    if (try core.checkLegacyVaultExists(allocator)) {
+        std.debug.print("Note: Found vault at legacy location (~/.config/zault/vault.zault).\n", .{});
+        std.debug.print("Consider migrating to ~/.local/share/zault/vault.zault\n\n", .{});
+    }
+
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
     if (args.len < 2) {
-        // No arguments - launch TUI or show help
         try showHelp();
         return;
     }
 
     const command = args[1];
-    try runCommand(allocator, command, args[2..]);
+    try runCommand(allocator, cfg, command, args[2..]);
 }
 
-fn runCommand(allocator: std.mem.Allocator, command: []const u8, args: []const []const u8) !void {
+fn runCommand(allocator: std.mem.Allocator, cfg: config.Config, command: []const u8, args: []const []const u8) !void {
     _ = allocator;
+    _ = cfg;
     _ = args;
 
     if (std.mem.eql(u8, command, "init")) {
@@ -144,6 +152,7 @@ test {
     @import("std").testing.refAllDecls(@This());
     _ = cli;
     _ = core;
+    _ = config;
     _ = entry;
     _ = memory;
     _ = argon2;

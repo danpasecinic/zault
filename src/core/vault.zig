@@ -377,7 +377,29 @@ pub const Vault = struct {
     }
 };
 
-pub fn getDefaultVaultPath(allocator: std.mem.Allocator) ![]const u8 {
+pub fn getDefaultVaultDataPath(allocator: std.mem.Allocator) ![]const u8 {
+    const home = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
+    const data_home = std.posix.getenv("XDG_DATA_HOME");
+
+    if (data_home) |data| {
+        return std.fmt.allocPrint(allocator, "{s}/zault/vault.zault", .{data});
+    } else {
+        return std.fmt.allocPrint(allocator, "{s}/.local/share/zault/vault.zault", .{home});
+    }
+}
+
+pub fn getDefaultVaultDataDir(allocator: std.mem.Allocator) ![]const u8 {
+    const home = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
+    const data_home = std.posix.getenv("XDG_DATA_HOME");
+
+    if (data_home) |data| {
+        return std.fmt.allocPrint(allocator, "{s}/zault", .{data});
+    } else {
+        return std.fmt.allocPrint(allocator, "{s}/.local/share/zault", .{home});
+    }
+}
+
+pub fn getLegacyVaultPath(allocator: std.mem.Allocator) ![]const u8 {
     const home = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
     const config_home = std.posix.getenv("XDG_CONFIG_HOME");
 
@@ -388,15 +410,12 @@ pub fn getDefaultVaultPath(allocator: std.mem.Allocator) ![]const u8 {
     }
 }
 
-pub fn getDefaultVaultDir(allocator: std.mem.Allocator) ![]const u8 {
-    const home = std.posix.getenv("HOME") orelse return error.NoHomeDirectory;
-    const config_home = std.posix.getenv("XDG_CONFIG_HOME");
+pub fn checkLegacyVaultExists(allocator: std.mem.Allocator) !bool {
+    const legacy_path = try getLegacyVaultPath(allocator);
+    defer allocator.free(legacy_path);
 
-    if (config_home) |config| {
-        return std.fmt.allocPrint(allocator, "{s}/zault", .{config});
-    } else {
-        return std.fmt.allocPrint(allocator, "{s}/.config/zault", .{home});
-    }
+    std.fs.cwd().access(legacy_path, .{}) catch return false;
+    return true;
 }
 
 test "vault init" {
