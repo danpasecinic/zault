@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 
 const cli = @import("cli/root.zig");
 const core = @import("core/vault.zig");
@@ -141,7 +142,7 @@ fn showHelp() !void {
 }
 
 fn showVersion() !void {
-    std.debug.print("zault version 0.1.0\n", .{});
+    std.debug.print("zault version {s}\n", .{build_options.version});
 }
 
 test "basic command parsing" {

@@ -85,7 +85,7 @@ jobs:
       - name: Get current version
         id: current_version
         run: |
-          VERSION=$(grep 'version = ' build.zig.zon | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          VERSION=$(grep 'const version = ' build.zig | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Configure git
@@ -110,7 +110,7 @@ jobs:
           IFS='.' read -r major minor patch <<< "$CURRENT"
           NEW_PATCH=$((patch + 1))
           NEW_VERSION="${major}.${minor}.${NEW_PATCH}"
-          sed -i "s/version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" build.zig.zon
+          sed -i "s/const version = \"$CURRENT\"/const version = \"$NEW_VERSION\"/" build.zig
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
 
       - name: Set final version
@@ -125,7 +125,7 @@ jobs:
       - name: Commit version bump
         if: steps.check_tag.outputs.exists == 'true'
         run: |
-          git add build.zig.zon
+          git add build.zig
           git commit -m "chore: bump version to ${{ steps.final_version.outputs.version }}"
           git push
 
