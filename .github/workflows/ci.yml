@@ -88,6 +88,11 @@ jobs:
           VERSION=$(grep 'version = ' build.zig.zon | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Check if tag exists
         id: check_tag
         run: |
@@ -120,8 +125,6 @@ jobs:
       - name: Commit version bump
         if: steps.check_tag.outputs.exists == 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add build.zig.zon
           git commit -m "chore: bump version to ${{ steps.final_version.outputs.version }}"
           git push
