@@ -4,35 +4,48 @@
 
 zault is built with a layered architecture, separating concerns for maintainability and security.
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           USER INTERFACES                                │
-│  CLI (commands) │ TUI (interactive) │ Browser Bridge (native messaging) │
-└─────────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                            SERVICES                                      │
-│  Credentials │ TOTP │ Passkeys │ Generator │ Clipboard                  │
-└─────────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                              CORE                                        │
-│  Vault │ Entry │ MasterKey │ Config                                     │
-└─────────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                             CRYPTO                                       │
-│  Argon2 │ XChaCha20 │ HMAC │ ECDSA │ Random                             │
-└─────────────────────────────────────────────────────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         MEMORY & STORAGE                                 │
-│  SecureAllocator │ VaultFormat │ Serialization │ Paths                  │
-└─────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph UI["User Interfaces"]
+        CLI[CLI]
+        TUI[TUI]
+        Bridge[Browser Bridge]
+    end
+
+    subgraph Services["Services"]
+        Creds[Credentials]
+        TOTP[TOTP]
+        Passkeys[Passkeys]
+        Gen[Generator]
+        Clip[Clipboard]
+    end
+
+    subgraph Core["Core"]
+        Vault[Vault]
+        Entry[Entry]
+        MasterKey[MasterKey]
+        Config[Config]
+    end
+
+    subgraph Crypto["Crypto"]
+        Argon2[Argon2]
+        XChaCha[XChaCha20]
+        HMAC[HMAC]
+        ECDSA[ECDSA]
+        Random[Random]
+    end
+
+    subgraph Storage["Memory & Storage"]
+        SecAlloc[SecureAllocator]
+        Format[VaultFormat]
+        Serial[Serialization]
+        Paths[Paths]
+    end
+
+    UI --> Services
+    Services --> Core
+    Core --> Crypto
+    Crypto --> Storage
 ```
 
 ## Module Responsibilities
@@ -117,86 +130,65 @@ Browser integration.
 
 ### Adding a Password
 
-```
-User Input
-    │
-    ▼
-CLI/TUI Parser
-    │
-    ▼
-Credentials Service
-    │  - Validate input
-    │  - Create Entry struct
-    │
-    ▼
-Vault
-    │  - Add to entries list
-    │  - Serialize vault
-    │  - Encrypt with master key
-    │
-    ▼
-Storage
-    │  - Write to disk
-    │
-    ▼
-Done
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant CredService as Credentials Service
+    participant Vault
+    participant Storage
+
+    User->>CLI: zault add github.com
+    CLI->>CredService: create entry
+    CredService->>CredService: validate input
+    CredService->>Vault: add entry
+    Vault->>Vault: serialize entries
+    Vault->>Vault: encrypt with master key
+    Vault->>Storage: write to disk
+    Storage-->>User: success
 ```
 
 ### Getting a TOTP Code
 
-```
-User Input (entry name)
-    │
-    ▼
-CLI/TUI Parser
-    │
-    ▼
-Vault
-    │  - Find TOTP entry
-    │
-    ▼
-TOTP Service
-    │  - Decode secret
-    │  - Calculate HMAC
-    │  - Truncate to digits
-    │
-    ▼
-Clipboard Service
-    │  - Copy to clipboard
-    │  - Schedule clear
-    │
-    ▼
-Display code + time remaining
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant Vault
+    participant TOTP as TOTP Service
+    participant Clipboard
+
+    User->>CLI: zault totp github
+    CLI->>Vault: find TOTP entry
+    Vault-->>TOTP: entry data
+    TOTP->>TOTP: decode secret
+    TOTP->>TOTP: calculate HMAC
+    TOTP->>TOTP: truncate to digits
+    TOTP->>Clipboard: copy code
+    Clipboard->>Clipboard: schedule clear (45s)
+    TOTP-->>User: display code + time remaining
 ```
 
 ### Passkey Authentication
 
-```
-Browser Extension
-    │  - Receive WebAuthn request
-    │  - Send via native messaging
-    │
-    ▼
-Native Messaging Bridge
-    │  - Parse JSON-RPC
-    │  - Validate origin
-    │
-    ▼
-Passkey Service
-    │  - Find matching credential
-    │  - Sign challenge
-    │
-    ▼
-Vault
-    │  - Increment counter
-    │  - Save updated entry
-    │
-    ▼
-Native Messaging Bridge
-    │  - Return signed assertion
-    │
-    ▼
-Browser Extension
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Bridge as Native Messaging
+    participant Passkey as Passkey Service
+    participant Vault
+
+    Browser->>Bridge: WebAuthn request
+    Bridge->>Bridge: parse JSON-RPC
+    Bridge->>Bridge: validate origin
+    Bridge->>Passkey: authenticate
+    Passkey->>Vault: find credential
+    Vault-->>Passkey: credential data
+    Passkey->>Passkey: sign challenge
+    Passkey->>Vault: increment counter
+    Vault->>Vault: save updated entry
+    Passkey-->>Bridge: signed assertion
+    Bridge-->>Browser: response
 ```
 
 ## Error Handling

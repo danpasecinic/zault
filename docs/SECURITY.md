@@ -21,19 +21,16 @@ This document describes the security architecture of zault.
 
 ### Key Derivation
 
-```
-Master Password
-      │
-      ▼
-┌─────────────┐
-│  Argon2id   │◄── Salt (32 bytes, random)
-│  Memory: 64MB
-│  Iterations: 3
-│  Parallelism: 4
-└─────────────┘
-      │
-      ▼
-  Master Key (32 bytes)
+```mermaid
+flowchart TB
+    MP[Master Password] --> Argon2
+    Salt[Salt - 32 bytes random] --> Argon2
+
+    subgraph Argon2["Argon2id"]
+        Params["Memory: 64MB | Iterations: 3 | Parallelism: 4"]
+    end
+
+    Argon2 --> MK[Master Key - 32 bytes]
 ```
 
 **Why Argon2id?**
@@ -44,16 +41,18 @@ Master Password
 
 ### Vault Encryption
 
-```
-Master Key
-     │
-     ▼
-┌──────────────────┐
-│ XChaCha20-Poly1305│◄── Nonce (24 bytes, random)
-└──────────────────┘
-     │
-     ▼
-Encrypted Vault + Auth Tag
+```mermaid
+flowchart TB
+    MK[Master Key] --> XChaCha
+    Nonce[Nonce - 24 bytes random] --> XChaCha
+    Plaintext[Vault Data] --> XChaCha
+
+    subgraph XChaCha["XChaCha20-Poly1305"]
+        AEAD[Authenticated Encryption]
+    end
+
+    XChaCha --> Ciphertext[Encrypted Vault]
+    XChaCha --> Tag[Auth Tag - 16 bytes]
 ```
 
 **Why XChaCha20-Poly1305?**
@@ -85,15 +84,17 @@ Encrypted Vault + Auth Tag
 
 ### Memory Layout
 
-```
-┌─────────────────────────────────────┐
-│  Regular heap                       │
-├─────────────────────────────────────┤
-│  Locked pages (mlock)               │
-│  ├── Master key                     │
-│  ├── Decrypted entries              │
-│  └── TOTP secrets                   │
-└─────────────────────────────────────┘
+```mermaid
+block-beta
+    columns 1
+    block:heap["Process Memory"]
+        regular["Regular Heap"]
+        block:locked["Locked Pages (mlock)"]
+            mk["Master Key"]
+            entries["Decrypted Entries"]
+            totp["TOTP Secrets"]
+        end
+    end
 ```
 
 ## Clipboard Security
@@ -103,21 +104,28 @@ Encrypted Vault + Auth Tag
 
 ## Vault Format
 
+```mermaid
+packet-beta
+    0-31: "Magic: ZAUL"
+    32-47: "Version: u16"
+    48-95: "KDF Params"
+    96-351: "Salt (32 bytes)"
+    352-543: "Nonce (24 bytes)"
+    544-799: "..."
+    800-1055: "Ciphertext (variable)"
+    1056-1183: "Auth Tag (16 bytes)"
 ```
-┌─────────────────────────────────────┐
-│  Header (96 bytes, unencrypted)     │
-│  ├── Magic: "ZAUL" (4 bytes)        │
-│  ├── Version: u16                   │
-│  ├── KDF params                     │
-│  ├── Salt (32 bytes)                │
-│  └── Nonce (24 bytes)               │
-├─────────────────────────────────────┤
-│  Ciphertext (variable length)       │
-│  └── Encrypted entry data           │
-├─────────────────────────────────────┤
-│  Auth Tag (16 bytes)                │
-└─────────────────────────────────────┘
-```
+
+| Section | Size | Description |
+|---------|------|-------------|
+| Header | 96 bytes | Unencrypted metadata |
+| Magic | 4 bytes | "ZAUL" identifier |
+| Version | 2 bytes | Format version |
+| KDF params | varies | Argon2 parameters |
+| Salt | 32 bytes | Random salt |
+| Nonce | 24 bytes | XChaCha20 nonce |
+| Ciphertext | variable | Encrypted entries |
+| Auth Tag | 16 bytes | Poly1305 tag |
 
 ## Security Recommendations
 
@@ -145,6 +153,6 @@ If you'd like to sponsor a security audit, please open an issue.
 
 ## Reporting Vulnerabilities
 
-Please report security vulnerabilities privately to: [security contact]
+Please report security vulnerabilities privately via GitHub Security Advisories.
 
 Do not open public issues for security vulnerabilities.
