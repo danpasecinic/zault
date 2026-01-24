@@ -55,10 +55,15 @@ pub fn generate(allocator: std.mem.Allocator, options: GeneratorOptions) ![]u8 {
     const password = try allocator.alloc(u8, options.length);
     errdefer allocator.free(password);
 
-    std.crypto.random.bytes(password);
+    const charset_len: usize = charset.items.len;
+    const max_valid: u16 = 256 - @as(u16, @intCast(256 % charset_len));
 
     for (password) |*c| {
-        c.* = charset.items[c.* % charset.items.len];
+        while (true) {
+            std.crypto.random.bytes(@as(*[1]u8, @ptrCast(c)));
+            if (c.* < max_valid) break;
+        }
+        c.* = charset.items[c.* % charset_len];
     }
 
     try ensureCharacterCategories(password, options, charset.items);
@@ -80,11 +85,10 @@ fn ensureCharacterCategories(password: []u8, options: GeneratorOptions, charset:
 
     var positions: [4]usize = .{ 0, 1, 2, 3 };
 
-    var rng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
-    const random = rng.random();
-
     for (0..positions.len) |i| {
-        const j = random.intRangeAtMost(usize, i, positions.len - 1);
+        var rand_bytes: [1]u8 = undefined;
+        std.crypto.random.bytes(&rand_bytes);
+        const j = i + (rand_bytes[0] % (positions.len - i));
         const tmp = positions[i];
         positions[i] = positions[j];
         positions[j] = tmp;
@@ -94,25 +98,33 @@ fn ensureCharacterCategories(password: []u8, options: GeneratorOptions, charset:
 
     if (options.uppercase and pos_idx < positions.len) {
         const chars = if (options.exclude_ambiguous) "ABCDEFGHJKMNPQRSTUVWXYZ" else "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        password[positions[pos_idx]] = chars[random.intRangeLessThan(usize, 0, chars.len)];
+        var rand: [1]u8 = undefined;
+        std.crypto.random.bytes(&rand);
+        password[positions[pos_idx]] = chars[rand[0] % chars.len];
         pos_idx += 1;
     }
 
     if (options.lowercase and pos_idx < positions.len) {
         const chars = if (options.exclude_ambiguous) "abcdefghjkmnpqrstuvwxyz" else "abcdefghijklmnopqrstuvwxyz";
-        password[positions[pos_idx]] = chars[random.intRangeLessThan(usize, 0, chars.len)];
+        var rand: [1]u8 = undefined;
+        std.crypto.random.bytes(&rand);
+        password[positions[pos_idx]] = chars[rand[0] % chars.len];
         pos_idx += 1;
     }
 
     if (options.digits and pos_idx < positions.len) {
         const chars = if (options.exclude_ambiguous) "23456789" else "0123456789";
-        password[positions[pos_idx]] = chars[random.intRangeLessThan(usize, 0, chars.len)];
+        var rand: [1]u8 = undefined;
+        std.crypto.random.bytes(&rand);
+        password[positions[pos_idx]] = chars[rand[0] % chars.len];
         pos_idx += 1;
     }
 
     if (options.symbols and pos_idx < positions.len) {
         const chars = options.custom_symbols orelse default_symbols;
-        password[positions[pos_idx]] = chars[random.intRangeLessThan(usize, 0, chars.len)];
+        var rand: [1]u8 = undefined;
+        std.crypto.random.bytes(&rand);
+        password[positions[pos_idx]] = chars[rand[0] % chars.len];
         pos_idx += 1;
     }
 }

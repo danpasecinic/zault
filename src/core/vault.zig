@@ -219,6 +219,12 @@ pub const Vault = struct {
             &self.header.salt,
             params,
         );
+        errdefer {
+            if (self.derived_key) |*key| {
+                memory.secureZero(key);
+                self.derived_key = null;
+            }
+        }
 
         const file = std.fs.cwd().openFile(self.path, .{}) catch return VaultError.VaultNotFound;
         defer file.close();
@@ -226,6 +232,9 @@ pub const Vault = struct {
         file.seekTo(VaultHeader.SIZE) catch return VaultError.IoError;
 
         const file_stat = file.stat() catch return VaultError.IoError;
+        if (file_stat.size < VaultHeader.SIZE) {
+            return VaultError.VaultCorrupted;
+        }
         const encrypted_size = file_stat.size - VaultHeader.SIZE;
 
         if (encrypted_size < xchacha.tag_length) {
@@ -297,7 +306,10 @@ pub const Vault = struct {
         std.crypto.random.bytes(&self.header.nonce);
 
         const plaintext = serializer.serializeEntries(self.allocator, self.entries.items) catch return VaultError.IoError;
-        defer self.allocator.free(plaintext);
+        defer {
+            memory.secureZero(plaintext);
+            self.allocator.free(plaintext);
+        }
 
         const ciphertext = self.allocator.alloc(u8, plaintext.len) catch return VaultError.IoError;
         defer self.allocator.free(ciphertext);
@@ -311,7 +323,7 @@ pub const Vault = struct {
             std.fs.cwd().makePath(dp) catch {};
         }
 
-        const file = std.fs.cwd().createFile(self.path, .{}) catch return VaultError.IoError;
+        const file = std.fs.cwd().createFile(self.path, .{ .mode = 0o600 }) catch return VaultError.IoError;
         defer file.close();
 
         const header_bytes = self.header.serialize();
