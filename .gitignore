@@ -1,0 +1,36 @@
+# Zig build artifacts
+zig-out/
+zig-cache/
+.zig-cache/
+
+# Editor and IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test artifacts
+/test-results/
+coverage/
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Local development
+.env
+.env.local
+*.local
+
+# Vault files (never commit real vaults!)
+*.zault
+vault.json
+
+# Logs
+*.log
