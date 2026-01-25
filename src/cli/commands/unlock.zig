@@ -116,8 +116,10 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, _: config.Con
             server.deinit();
             std.posix.exit(0);
         } else {
+            // Parent: just free memory, don't stop/delete socket
             server.server = null;
-            server.deinit();
+            memory.secureZero(&server.derived_key);
+            allocator.free(server.socket_path);
             std.debug.print("Agent running in background (PID: {d}).\n", .{pid});
             std.debug.print("Run 'zault lock' to lock the vault.\n", .{});
         }
