@@ -5,3 +5,4 @@ pub const list = @import("list.zig");
 pub const delete = @import("delete.zig");
 pub const generate = @import("generate.zig");
 pub const totp_cmd = @import("totp.zig");
+pub const passkey = @import("passkey.zig");
