@@ -225,6 +225,7 @@ pub const AgentServer = struct {
             return true;
         } else if (std.mem.eql(u8, cmd_line, "LOCK")) {
             _ = std.posix.write(client, &[_]u8{@intFromEnum(Response.ok)}) catch {};
+            memory.secureZero(&self.derived_key);
             self.running = false;
             return false;
         } else if (std.mem.eql(u8, cmd_line, "STATUS")) {

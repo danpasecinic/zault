@@ -173,7 +173,10 @@ pub const Config = struct {
 
     fn applySecurityValue(config: *Self, key: []const u8, value: []const u8) void {
         if (std.mem.eql(u8, key, "auto_lock_minutes")) {
-            config.auto_lock_minutes = parseU32(value) orelse config.auto_lock_minutes;
+            if (parseU32(value)) |minutes| {
+                // Cap at 24 hours (1440 minutes) to prevent unreasonable values
+                config.auto_lock_minutes = if (minutes > 1440) 1440 else minutes;
+            }
         }
     }
 
@@ -315,4 +318,26 @@ test "config path generation" {
     defer allocator.free(config_path);
 
     try std.testing.expect(std.mem.endsWith(u8, config_path, "zault/config.toml"));
+}
+
+test "config auto_lock_minutes capped at 24 hours" {
+    const content =
+        \\[security]
+        \\auto_lock_minutes = 9999
+    ;
+
+    const config = Config.parse(content);
+
+    try std.testing.expectEqual(@as(u32, 1440), config.auto_lock_minutes);
+}
+
+test "config auto_lock_minutes accepts valid values" {
+    const content =
+        \\[security]
+        \\auto_lock_minutes = 60
+    ;
+
+    const config = Config.parse(content);
+
+    try std.testing.expectEqual(@as(u32, 60), config.auto_lock_minutes);
 }
