@@ -59,13 +59,15 @@ pub const AgentServer = struct {
     pub fn init(allocator: std.mem.Allocator, derived_key: [KEY_LENGTH]u8) !Self {
         const socket_path = try getSocketPath(allocator);
 
-        return Self{
+        const self = Self{
             .allocator = allocator,
             .socket_path = socket_path,
             .derived_key = derived_key,
             .server = null,
             .running = false,
         };
+
+        return self;
     }
 
     pub fn deinit(self: *Self) void {
@@ -115,6 +117,11 @@ pub const AgentServer = struct {
     }
 
     fn handleClient(self: *Self, client: std.posix.socket_t) void {
+        if (!self.verifyPeerCredentials(client)) {
+            _ = std.posix.write(client, &[_]u8{@intFromEnum(Response.err)}) catch {};
+            return;
+        }
+
         var buf: [32]u8 = undefined;
         const n = std.posix.read(client, &buf) catch return;
         if (n == 0) return;
@@ -134,6 +141,34 @@ pub const AgentServer = struct {
         } else {
             _ = std.posix.write(client, &[_]u8{@intFromEnum(Response.err)}) catch {};
         }
+    }
+
+    fn verifyPeerCredentials(_: *Self, client: std.posix.socket_t) bool {
+        const my_uid = std.posix.getuid();
+
+        if (builtin.os.tag == .macos) {
+            const getpeereid = @extern(*const fn (c_int, *std.posix.uid_t, *std.posix.gid_t) callconv(.c) c_int, .{ .name = "getpeereid" });
+            var euid: std.posix.uid_t = undefined;
+            var egid: std.posix.gid_t = undefined;
+            const rc = getpeereid(client, &euid, &egid);
+            if (rc != 0) return false;
+            return euid == my_uid;
+        } else if (builtin.os.tag == .linux) {
+            const SOL_SOCKET = 1;
+            const SO_PEERCRED = 17;
+            const Ucred = extern struct {
+                pid: i32,
+                uid: u32,
+                gid: u32,
+            };
+            var cred: Ucred = undefined;
+            var len: std.posix.socklen_t = @sizeOf(Ucred);
+            const rc = std.c.getsockopt(client, SOL_SOCKET, SO_PEERCRED, @ptrCast(&cred), &len);
+            if (rc != 0) return false;
+            return cred.uid == my_uid;
+        }
+
+        return true;
     }
 
     pub fn stop(self: *Self) void {

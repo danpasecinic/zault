@@ -6,3 +6,5 @@ pub const delete = @import("delete.zig");
 pub const generate = @import("generate.zig");
 pub const totp_cmd = @import("totp.zig");
 pub const passkey = @import("passkey.zig");
+pub const unlock = @import("unlock.zig");
+pub const lock = @import("lock.zig");
