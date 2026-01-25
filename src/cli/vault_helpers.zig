@@ -55,7 +55,11 @@ pub fn openAndUnlock(allocator: std.mem.Allocator) OpenError!VaultContext {
         if (c.getKey()) |key| {
             var mutable_key = key;
             defer memory.secureZero(&mutable_key);
-            vault.unlockWithKey(key) catch {};
+            vault.unlockWithKey(key) catch |err| {
+                if (err != core.VaultError.InvalidMasterPassword) {
+                    std.log.warn("Agent key failed: {}", .{err});
+                }
+            };
             if (!vault.is_locked) {
                 const empty_pass = allocator.alloc(u8, 0) catch return OpenError.PasswordReadError;
                 return VaultContext{

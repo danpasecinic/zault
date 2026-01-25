@@ -28,7 +28,6 @@ pub const Response = enum {
     err,
 };
 
-const PROTOCOL_VERSION: u8 = 1;
 const KEY_LENGTH = argon2.key_length;
 
 pub fn getSocketPath(allocator: std.mem.Allocator) ![]const u8 {
@@ -42,9 +41,28 @@ pub fn getSocketPath(allocator: std.mem.Allocator) ![]const u8 {
     const user = std.posix.getenv("USER") orelse "unknown";
     const dir_path = try std.fmt.allocPrint(allocator, "/tmp/zault-{s}", .{user});
     defer allocator.free(dir_path);
+
     std.fs.cwd().makePath(dir_path) catch {};
 
+    if (verifyDirectoryOwnership(dir_path)) |_| {} else |_| {
+        return error.UnsafeSocketPath;
+    }
+
     return std.fmt.allocPrint(allocator, "/tmp/zault-{s}/agent.sock", .{user});
+}
+
+fn verifyDirectoryOwnership(path: []const u8) !void {
+    const stat = std.fs.cwd().statFile(path) catch return error.StatFailed;
+    if (stat.kind == .sym_link) return error.SymlinkNotAllowed;
+
+    if (builtin.os.tag == .linux or builtin.os.tag == .macos) {
+        const path_z = std.posix.toPosixPath(path) catch return error.PathTooLong;
+        var statbuf: std.c.Stat = undefined;
+        const lstat_fn = @extern(*const fn ([*:0]const u8, *std.c.Stat) callconv(.c) c_int, .{ .name = "lstat" });
+        if (lstat_fn(&path_z, &statbuf) != 0) return error.StatFailed;
+        const my_uid = std.posix.getuid();
+        if (statbuf.uid != my_uid) return error.OwnershipMismatch;
+    }
 }
 
 pub const AgentServer = struct {
@@ -94,6 +112,21 @@ pub const AgentServer = struct {
             if (std.posix.toPosixPath(self.socket_path)) |path_z| {
                 _ = std.c.chmod(&path_z, 0o600);
             } else |_| {}
+
+            const path_z = std.posix.toPosixPath(self.socket_path) catch {
+                std.posix.close(socket);
+                return AgentError.BindFailed;
+            };
+            var statbuf: std.c.Stat = undefined;
+            const lstat_fn = @extern(*const fn ([*:0]const u8, *std.c.Stat) callconv(.c) c_int, .{ .name = "lstat" });
+            if (lstat_fn(&path_z, &statbuf) != 0) {
+                std.posix.close(socket);
+                return AgentError.BindFailed;
+            }
+            if (statbuf.uid != std.posix.getuid()) {
+                std.posix.close(socket);
+                return AgentError.PermissionDenied;
+            }
         }
 
         std.posix.listen(socket, 5) catch return AgentError.ListenFailed;
@@ -168,7 +201,7 @@ pub const AgentServer = struct {
             return cred.uid == my_uid;
         }
 
-        return true;
+        return false;
     }
 
     pub fn stop(self: *Self) void {
@@ -227,6 +260,8 @@ pub const AgentClient = struct {
         _ = std.posix.write(socket, "GET_KEY\n") catch return AgentError.ProtocolError;
 
         var buf: [1 + KEY_LENGTH]u8 = undefined;
+        defer memory.secureZero(&buf);
+
         const n = std.posix.read(socket, &buf) catch return AgentError.ProtocolError;
         if (n != 1 + KEY_LENGTH) return AgentError.ProtocolError;
 
