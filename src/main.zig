@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const build_options = @import("build_options");
 
 const cli = @import("cli/root.zig");
+const commands = @import("cli/commands/root.zig");
 const core = @import("core/vault.zig");
 const config = @import("core/config.zig");
 const entry = @import("core/entry.zig");
@@ -42,26 +43,22 @@ pub fn main() !void {
 }
 
 fn runCommand(allocator: std.mem.Allocator, cfg: config.Config, command: []const u8, args: []const []const u8) !void {
-    _ = allocator;
-    _ = cfg;
-    _ = args;
-
     if (std.mem.eql(u8, command, "init")) {
-        try cmdInit();
+        try commands.init.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "add")) {
-        try cmdAdd();
+        try commands.add.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "get")) {
-        try cmdGet();
+        try commands.get.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "list")) {
-        try cmdList();
+        try commands.list.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "delete")) {
-        try cmdDelete();
+        try commands.delete.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "generate")) {
-        try cmdGenerate();
+        try commands.generate.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "totp")) {
-        try cmdTotp();
+        try commands.totp_cmd.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "passkey")) {
-        try cmdPasskey();
+        try commands.passkey.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
         try showHelp();
     } else if (std.mem.eql(u8, command, "version") or std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
@@ -70,39 +67,6 @@ fn runCommand(allocator: std.mem.Allocator, cfg: config.Config, command: []const
         std.debug.print("Unknown command: {s}\n", .{command});
         std.debug.print("Run 'zault help' for usage information.\n", .{});
     }
-}
-
-fn cmdInit() !void {
-    std.debug.print("Initializing new vault...\n", .{});
-    std.debug.print("Not yet implemented\n", .{});
-}
-
-fn cmdAdd() !void {
-    std.debug.print("Not yet implemented\n", .{});
-}
-
-fn cmdGet() !void {
-    std.debug.print("Not yet implemented\n", .{});
-}
-
-fn cmdList() !void {
-    std.debug.print("Not yet implemented\n", .{});
-}
-
-fn cmdDelete() !void {
-    std.debug.print("Not yet implemented\n", .{});
-}
-
-fn cmdGenerate() !void {
-    std.debug.print("Not yet implemented\n", .{});
-}
-
-fn cmdTotp() !void {
-    std.debug.print("Not yet implemented\n", .{});
-}
-
-fn cmdPasskey() !void {
-    std.debug.print("Not yet implemented\n", .{});
 }
 
 fn showHelp() !void {

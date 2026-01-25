@@ -43,6 +43,15 @@ fn serializeEntry(allocator: std.mem.Allocator, buffer: *std.ArrayList(u8), e: e
             try writeString(allocator, buffer, p.password);
             try writeOptionalString(allocator, buffer, p.url);
             try writeOptionalString(allocator, buffer, p.notes);
+            if (p.totp_secret) |secret| {
+                try writer.writeByte(1);
+                try writeString(allocator, buffer, secret);
+                try writer.writeByte(@intFromEnum(p.totp_algorithm));
+                try writer.writeByte(p.totp_digits);
+                try writer.writeInt(u32, p.totp_period, .little);
+            } else {
+                try writer.writeByte(0);
+            }
         },
         .totp => |t| {
             try writeString(allocator, buffer, t.secret);
@@ -141,11 +150,31 @@ fn deserializePasswordEntry(allocator: std.mem.Allocator, reader: anytype) !entr
     const notes = try readOptionalString(allocator, reader);
     errdefer if (notes) |n| allocator.free(n);
 
+    const has_totp = reader.readByte() catch 0;
+    var totp_secret: ?[]u8 = null;
+    var totp_algorithm: entry.TotpAlgorithm = .sha1;
+    var totp_digits: u8 = 6;
+    var totp_period: u32 = 30;
+
+    if (has_totp == 1) {
+        totp_secret = try readString(allocator, reader);
+        errdefer if (totp_secret) |s| allocator.free(s);
+
+        const algo_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
+        totp_algorithm = std.meta.intToEnum(entry.TotpAlgorithm, algo_byte) catch return DeserializeError.InvalidData;
+        totp_digits = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
+        totp_period = reader.readInt(u32, .little) catch return DeserializeError.UnexpectedEndOfData;
+    }
+
     return entry.PasswordEntry{
         .username = username,
         .password = password,
         .url = url,
         .notes = notes,
+        .totp_secret = totp_secret,
+        .totp_algorithm = totp_algorithm,
+        .totp_digits = totp_digits,
+        .totp_period = totp_period,
     };
 }
 

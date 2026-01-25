@@ -37,6 +37,10 @@ pub const PasswordEntry = struct {
     password: []const u8,
     url: ?[]const u8,
     notes: ?[]const u8,
+    totp_secret: ?[]const u8 = null,
+    totp_algorithm: TotpAlgorithm = .sha1,
+    totp_digits: u8 = 6,
+    totp_period: u32 = 30,
 
     const Self = @This();
 
@@ -46,6 +50,14 @@ pub const PasswordEntry = struct {
         allocator.free(self.password);
         if (self.url) |url| allocator.free(url);
         if (self.notes) |n| allocator.free(n);
+        if (self.totp_secret) |secret| {
+            @memset(@constCast(secret), 0);
+            allocator.free(secret);
+        }
+    }
+
+    pub fn hasTotp(self: *const Self) bool {
+        return self.totp_secret != null;
     }
 };
 
@@ -134,6 +146,43 @@ pub fn createPasswordEntry(
                 .password = password_copy,
                 .url = url_copy,
                 .notes = null,
+            },
+        },
+    };
+}
+
+pub fn createTotpEntry(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    secret: []const u8,
+    issuer: ?[]const u8,
+    algorithm: TotpAlgorithm,
+    digits: u8,
+    period: u32,
+) !Entry {
+    const now = std.time.timestamp();
+
+    const name_copy = try allocator.dupe(u8, name);
+    errdefer allocator.free(name_copy);
+
+    const secret_copy = try allocator.dupe(u8, secret);
+    errdefer allocator.free(secret_copy);
+
+    const issuer_copy = if (issuer) |i| try allocator.dupe(u8, i) else null;
+    errdefer if (issuer_copy) |i| allocator.free(i);
+
+    return Entry{
+        .name = name_copy,
+        .entry_type = .totp,
+        .created_at = now,
+        .modified_at = now,
+        .data = .{
+            .totp = .{
+                .secret = secret_copy,
+                .algorithm = algorithm,
+                .digits = digits,
+                .period = period,
+                .issuer = issuer_copy,
             },
         },
     };
