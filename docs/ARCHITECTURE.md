@@ -84,6 +84,7 @@ Business logic for specific features.
 - `passkey.zig` - WebAuthn credential handling
 - `generator.zig` - Password/passphrase generation
 - `clipboard.zig` - Clipboard operations with auto-clear
+- `agent.zig` - Background agent for credential caching (ssh-agent style)
 
 ### Crypto (`src/crypto/`)
 
@@ -189,6 +190,33 @@ sequenceDiagram
     Vault->>Vault: save updated entry
     Passkey-->>Bridge: signed assertion
     Bridge-->>Browser: response
+```
+
+### Agent-Based Unlock
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant Agent as Agent Service
+    participant Vault
+
+    Note over User,Vault: Initial Unlock
+    User->>CLI: zault unlock
+    CLI->>Vault: unlock with password
+    Vault->>Vault: derive key (Argon2)
+    CLI->>Agent: start server with key
+    Agent->>Agent: fork to background
+    Agent->>Agent: listen on Unix socket
+
+    Note over User,Vault: Subsequent Commands
+    User->>CLI: zault list
+    CLI->>Agent: GET_KEY (via socket)
+    Agent->>Agent: verify peer credentials
+    Agent-->>CLI: derived key
+    CLI->>Vault: unlock with key
+    Vault-->>CLI: entries
+    CLI-->>User: display entries
 ```
 
 ## Error Handling
