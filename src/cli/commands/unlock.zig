@@ -5,7 +5,7 @@ const terminal = @import("../terminal.zig");
 const memory = @import("../../memory/secure_allocator.zig");
 const agent = @import("../../services/agent.zig");
 
-pub fn run(allocator: std.mem.Allocator, args: []const []const u8, _: config.Config) !void {
+pub fn run(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.Config) !void {
     for (args) |arg| {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             showHelp();
@@ -75,7 +75,7 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, _: config.Con
         return;
     };
 
-    var server = agent.AgentServer.init(allocator, derived_key) catch {
+    var server = agent.AgentServer.init(allocator, derived_key, cfg.auto_lock_minutes) catch {
         std.debug.print("Error: Could not initialize agent server\n", .{});
         return;
     };
@@ -94,6 +94,9 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, _: config.Con
     };
 
     std.debug.print("Vault unlocked. Agent running.\n", .{});
+    if (cfg.auto_lock_minutes > 0) {
+        std.debug.print("Auto-lock enabled: {d} minutes of inactivity.\n", .{cfg.auto_lock_minutes});
+    }
 
     if (foreground) {
         std.debug.print("Press Ctrl+C to lock and exit.\n", .{});
@@ -133,6 +136,10 @@ fn showHelp() void {
         \\Unlock the vault and start the agent. The agent holds the derived
         \\encryption key in memory, so subsequent commands don't require
         \\entering the master password.
+        \\
+        \\The vault will automatically lock after a period of inactivity
+        \\(default: 30 minutes). Configure with [security] auto_lock_minutes
+        \\in config.toml. Set to 0 to disable auto-lock.
         \\
         \\Options:
         \\    -f, --foreground    Run agent in foreground (don't daemonize)
