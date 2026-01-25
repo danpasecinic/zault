@@ -6,6 +6,7 @@ const terminal = @import("../terminal.zig");
 const memory = @import("../../memory/secure_allocator.zig");
 const clipboard = @import("../../services/clipboard.zig");
 const totp = @import("../../services/totp.zig");
+const vault_helpers = @import("../vault_helpers.zig");
 
 pub fn run(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.Config) !void {
     if (args.len == 0) {
@@ -17,6 +18,12 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.C
 
     if (std.mem.eql(u8, subcommand, "add")) {
         try runAdd(allocator, args[1..]);
+    } else if (std.mem.eql(u8, subcommand, "remove")) {
+        if (args.len < 2) {
+            std.debug.print("Usage: zault totp remove <name>\n", .{});
+            return;
+        }
+        try runRemove(allocator, args[1]);
     } else if (std.mem.eql(u8, subcommand, "list")) {
         try runList(allocator);
     } else if (std.mem.eql(u8, subcommand, "help") or std.mem.eql(u8, subcommand, "--help")) {
@@ -27,45 +34,8 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.C
 }
 
 fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
-    const vault_path = core.getDefaultVaultDataPath(allocator) catch {
-        std.debug.print("Error: Could not determine vault path\n", .{});
-        return;
-    };
-    defer allocator.free(vault_path);
-
-    var vault = core.Vault.open(allocator, vault_path) catch |err| {
-        switch (err) {
-            core.VaultError.VaultNotFound => {
-                std.debug.print("Error: No vault found. Run 'zault init' first.\n", .{});
-            },
-            else => {
-                std.debug.print("Error: Could not open vault\n", .{});
-            },
-        }
-        return;
-    };
-    defer vault.deinit();
-
-    const password = terminal.readPassword(allocator, "Master password: ") catch {
-        std.debug.print("Error: Could not read password\n", .{});
-        return;
-    };
-    defer {
-        memory.secureZero(password);
-        allocator.free(password);
-    }
-
-    vault.unlock(password) catch |err| {
-        switch (err) {
-            core.VaultError.InvalidMasterPassword => {
-                std.debug.print("Error: Invalid master password\n", .{});
-            },
-            else => {
-                std.debug.print("Error: Could not unlock vault\n", .{});
-            },
-        }
-        return;
-    };
+    var ctx = vault_helpers.openAndUnlock(allocator) catch return;
+    defer ctx.deinit();
 
     const entry_name = if (args.len > 0)
         args[0]
@@ -95,7 +65,21 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
-    const existing = vault.getEntry(entry_name);
+    _ = totp.generateCurrent(secret, 30, 6, .sha1) catch |err| {
+        memory.secureZero(secret);
+        allocator.free(secret);
+        switch (err) {
+            totp.TotpError.Base32DecodeError => {
+                std.debug.print("Error: Invalid base32 secret. Use only A-Z and 2-7.\n", .{});
+            },
+            else => {
+                std.debug.print("Error: Invalid TOTP secret\n", .{});
+            },
+        }
+        return;
+    };
+
+    const existing = ctx.vault.getEntry(entry_name);
     if (existing) |e| {
         if (e.entry_type == .password) {
             if (e.data.password.totp_secret) |old_secret| {
@@ -108,7 +92,7 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
             e.data.password.totp_period = 30;
             e.modified_at = std.time.timestamp();
 
-            vault.save() catch {
+            ctx.vault.save() catch {
                 std.debug.print("Error: Could not save vault\n", .{});
                 return;
             };
@@ -147,7 +131,7 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     };
 
-    vault.addEntry(new_entry) catch |err| {
+    ctx.vault.addEntry(new_entry) catch |err| {
         var mutable_entry = new_entry;
         mutable_entry.deinit(allocator);
         switch (err) {
@@ -161,7 +145,7 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     };
 
-    vault.save() catch {
+    ctx.vault.save() catch {
         std.debug.print("Error: Could not save vault\n", .{});
         return;
     };
@@ -169,48 +153,59 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     std.debug.print("TOTP entry '{s}' added successfully.\n", .{entry_name});
 }
 
-fn runGet(allocator: std.mem.Allocator, entry_name: []const u8, cfg: config.Config) !void {
-    const vault_path = core.getDefaultVaultDataPath(allocator) catch {
-        std.debug.print("Error: Could not determine vault path\n", .{});
-        return;
-    };
-    defer allocator.free(vault_path);
+fn runRemove(allocator: std.mem.Allocator, entry_name: []const u8) !void {
+    var ctx = vault_helpers.openAndUnlock(allocator) catch return;
+    defer ctx.deinit();
 
-    var vault = core.Vault.open(allocator, vault_path) catch |err| {
-        switch (err) {
-            core.VaultError.VaultNotFound => {
-                std.debug.print("Error: No vault found. Run 'zault init' first.\n", .{});
-            },
-            else => {
-                std.debug.print("Error: Could not open vault\n", .{});
-            },
-        }
+    const found_entry = ctx.vault.getEntry(entry_name);
+    if (found_entry == null) {
+        std.debug.print("Error: Entry '{s}' not found\n", .{entry_name});
         return;
-    };
-    defer vault.deinit();
-
-    const password = terminal.readPassword(allocator, "Master password: ") catch {
-        std.debug.print("Error: Could not read password\n", .{});
-        return;
-    };
-    defer {
-        memory.secureZero(password);
-        allocator.free(password);
     }
 
-    vault.unlock(password) catch |err| {
-        switch (err) {
-            core.VaultError.InvalidMasterPassword => {
-                std.debug.print("Error: Invalid master password\n", .{});
-            },
-            else => {
-                std.debug.print("Error: Could not unlock vault\n", .{});
-            },
-        }
-        return;
-    };
+    const e = found_entry.?;
+    switch (e.data) {
+        .totp => {
+            ctx.vault.deleteEntry(entry_name) catch {
+                std.debug.print("Error: Could not delete entry\n", .{});
+                return;
+            };
+            ctx.vault.save() catch {
+                std.debug.print("Error: Could not save vault\n", .{});
+                return;
+            };
+            std.debug.print("TOTP entry '{s}' deleted.\n", .{entry_name});
+        },
+        .password => |*p| {
+            if (p.totp_secret == null) {
+                std.debug.print("Entry '{s}' has no TOTP configured.\n", .{entry_name});
+                return;
+            }
+            @memset(@constCast(p.totp_secret.?), 0);
+            allocator.free(p.totp_secret.?);
+            p.totp_secret = null;
+            p.totp_algorithm = .sha1;
+            p.totp_digits = 6;
+            p.totp_period = 30;
+            e.modified_at = std.time.timestamp();
 
-    const found_entry = vault.getEntry(entry_name);
+            ctx.vault.save() catch {
+                std.debug.print("Error: Could not save vault\n", .{});
+                return;
+            };
+            std.debug.print("TOTP removed from '{s}'.\n", .{entry_name});
+        },
+        .passkey => {
+            std.debug.print("Entry '{s}' is a passkey, not a TOTP entry.\n", .{entry_name});
+        },
+    }
+}
+
+fn runGet(allocator: std.mem.Allocator, entry_name: []const u8, cfg: config.Config) !void {
+    var ctx = vault_helpers.openAndUnlock(allocator) catch return;
+    defer ctx.deinit();
+
+    const found_entry = ctx.vault.getEntry(entry_name);
     if (found_entry == null) {
         std.debug.print("Error: Entry '{s}' not found\n", .{entry_name});
         return;
@@ -248,8 +243,18 @@ fn generateAndShowCode(
         .sha512 => .sha512,
     };
 
-    const code = totp.generateCurrent(secret, period, digits, algo) catch {
-        std.debug.print("Error: Could not generate TOTP code\n", .{});
+    const code = totp.generateCurrent(secret, period, digits, algo) catch |err| {
+        switch (err) {
+            totp.TotpError.Base32DecodeError => {
+                std.debug.print("Error: Invalid TOTP secret (must be valid base32)\n", .{});
+            },
+            totp.TotpError.InvalidSecret => {
+                std.debug.print("Error: Invalid TOTP secret\n", .{});
+            },
+            else => {
+                std.debug.print("Error: Could not generate TOTP code\n", .{});
+            },
+        }
         return;
     };
 
@@ -274,48 +279,11 @@ fn generateAndShowCode(
 }
 
 fn runList(allocator: std.mem.Allocator) !void {
-    const vault_path = core.getDefaultVaultDataPath(allocator) catch {
-        std.debug.print("Error: Could not determine vault path\n", .{});
-        return;
-    };
-    defer allocator.free(vault_path);
-
-    var vault = core.Vault.open(allocator, vault_path) catch |err| {
-        switch (err) {
-            core.VaultError.VaultNotFound => {
-                std.debug.print("Error: No vault found. Run 'zault init' first.\n", .{});
-            },
-            else => {
-                std.debug.print("Error: Could not open vault\n", .{});
-            },
-        }
-        return;
-    };
-    defer vault.deinit();
-
-    const password = terminal.readPassword(allocator, "Master password: ") catch {
-        std.debug.print("Error: Could not read password\n", .{});
-        return;
-    };
-    defer {
-        memory.secureZero(password);
-        allocator.free(password);
-    }
-
-    vault.unlock(password) catch |err| {
-        switch (err) {
-            core.VaultError.InvalidMasterPassword => {
-                std.debug.print("Error: Invalid master password\n", .{});
-            },
-            else => {
-                std.debug.print("Error: Could not unlock vault\n", .{});
-            },
-        }
-        return;
-    };
+    var ctx = vault_helpers.openAndUnlock(allocator) catch return;
+    defer ctx.deinit();
 
     var count: usize = 0;
-    for (vault.entries.items) |e| {
+    for (ctx.vault.entries.items) |e| {
         if (e.entry_type == .totp) {
             count += 1;
         } else if (e.entry_type == .password and e.data.password.hasTotp()) {
@@ -332,7 +300,7 @@ fn runList(allocator: std.mem.Allocator) !void {
     std.debug.print("{s:<30} {s:<12} {s}\n", .{ "NAME", "TYPE", "ISSUER" });
     std.debug.print("{s}\n", .{"-" ** 55});
 
-    for (vault.entries.items) |e| {
+    for (ctx.vault.entries.items) |e| {
         if (e.entry_type == .totp) {
             const issuer = e.data.totp.issuer orelse "";
             std.debug.print("{s:<30} {s:<12} {s}\n", .{ e.name, "standalone", issuer });
@@ -347,13 +315,15 @@ fn showHelp() void {
         \\Usage: zault totp <subcommand> [options]
         \\
         \\Subcommands:
-        \\    add <name>    Add a new TOTP entry
-        \\    list          List all TOTP entries
-        \\    <name>        Get current TOTP code for entry
+        \\    add <name>      Add TOTP to entry (or create standalone)
+        \\    remove <name>   Remove TOTP from entry
+        \\    list            List all entries with TOTP
+        \\    <name>          Get current TOTP code for entry
         \\
         \\Examples:
         \\    zault totp add github.com
         \\    zault totp github.com
+        \\    zault totp remove github.com
         \\    zault totp list
         \\
     ;
