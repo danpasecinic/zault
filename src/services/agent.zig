@@ -71,11 +71,18 @@ pub const AgentServer = struct {
     derived_key: [KEY_LENGTH]u8,
     server: ?std.posix.socket_t,
     running: bool,
+    auto_lock_ns: ?i128,
+    last_activity: i128,
 
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator, derived_key: [KEY_LENGTH]u8) !Self {
+    pub fn init(allocator: std.mem.Allocator, derived_key: [KEY_LENGTH]u8, auto_lock_minutes: u32) !Self {
         const socket_path = try getSocketPath(allocator);
+
+        const auto_lock_ns: ?i128 = if (auto_lock_minutes == 0)
+            null
+        else
+            @as(i128, auto_lock_minutes) * 60 * std.time.ns_per_s;
 
         const self = Self{
             .allocator = allocator,
@@ -83,6 +90,8 @@ pub const AgentServer = struct {
             .derived_key = derived_key,
             .server = null,
             .running = false,
+            .auto_lock_ns = auto_lock_ns,
+            .last_activity = std.time.nanoTimestamp(),
         };
 
         return self;
@@ -138,7 +147,28 @@ pub const AgentServer = struct {
     pub fn runLoop(self: *Self) void {
         const server = self.server orelse return;
 
+        const poll_timeout_ms: i32 = 10_000;
+
         while (self.running) {
+            if (self.auto_lock_ns) |timeout_ns| {
+                const now = std.time.nanoTimestamp();
+                const elapsed = now - self.last_activity;
+                if (elapsed >= timeout_ns) {
+                    self.running = false;
+                    break;
+                }
+            }
+
+            var fds = [_]std.posix.pollfd{
+                .{ .fd = server, .events = std.posix.POLL.IN, .revents = 0 },
+            };
+
+            const poll_result = std.posix.poll(&fds, poll_timeout_ms) catch continue;
+
+            if (poll_result == 0) continue;
+
+            if (fds[0].revents & std.posix.POLL.IN == 0) continue;
+
             var client_addr: std.posix.sockaddr = undefined;
             var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
 
@@ -146,6 +176,7 @@ pub const AgentServer = struct {
             defer std.posix.close(client);
 
             self.handleClient(client);
+            self.last_activity = std.time.nanoTimestamp();
         }
     }
 
@@ -304,4 +335,30 @@ test "socket path generation" {
 
     try std.testing.expect(path.len > 0);
     try std.testing.expect(std.mem.endsWith(u8, path, "agent.sock"));
+}
+
+test "auto-lock timeout calculation" {
+    const allocator = std.testing.allocator;
+    var key: [KEY_LENGTH]u8 = undefined;
+    @memset(&key, 0);
+
+    var server_30min = try AgentServer.init(allocator, key, 30);
+    defer server_30min.deinit();
+    const expected_30min: i128 = 30 * 60 * std.time.ns_per_s;
+    try std.testing.expectEqual(expected_30min, server_30min.auto_lock_ns.?);
+
+    var server_1min = try AgentServer.init(allocator, key, 1);
+    defer server_1min.deinit();
+    const expected_1min: i128 = 1 * 60 * std.time.ns_per_s;
+    try std.testing.expectEqual(expected_1min, server_1min.auto_lock_ns.?);
+}
+
+test "auto-lock disabled when zero" {
+    const allocator = std.testing.allocator;
+    var key: [KEY_LENGTH]u8 = undefined;
+    @memset(&key, 0);
+
+    var server = try AgentServer.init(allocator, key, 0);
+    defer server.deinit();
+    try std.testing.expectEqual(@as(?i128, null), server.auto_lock_ns);
 }
