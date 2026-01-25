@@ -2,6 +2,7 @@ const std = @import("std");
 const config = @import("../../core/config.zig");
 const generator = @import("../../services/generator.zig");
 const clipboard = @import("../../services/clipboard.zig");
+const memory = @import("../../memory/secure_allocator.zig");
 
 pub fn run(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.Config) !void {
     var use_passphrase = false;
@@ -69,7 +70,10 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.C
             std.debug.print("Error: Could not generate password\n", .{});
             return;
         };
-    defer allocator.free(result);
+    defer {
+        memory.secureZero(result);
+        allocator.free(result);
+    }
 
     std.debug.print("{s}\n", .{result});
 

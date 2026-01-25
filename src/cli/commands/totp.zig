@@ -84,7 +84,7 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const should_free_name = args.len == 0;
     defer if (should_free_name) allocator.free(entry_name);
 
-    const secret = terminal.readLine(allocator, "TOTP Secret (base32): ") catch {
+    const secret = terminal.readPassword(allocator, "TOTP Secret (base32): ") catch {
         std.debug.print("Error: Could not read secret\n", .{});
         return;
     };
@@ -204,6 +204,8 @@ fn runGet(allocator: std.mem.Allocator, entry_name: []const u8, cfg: config.Conf
             const remaining = totp.getTimeRemaining(t.period);
 
             var code_str: [8]u8 = undefined;
+            defer memory.secureZero(&code_str);
+
             const code_slice = std.fmt.bufPrint(&code_str, "{d:0>6}", .{code}) catch {
                 std.debug.print("Error: Could not format TOTP code\n", .{});
                 return;

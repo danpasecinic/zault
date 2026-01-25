@@ -57,6 +57,8 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, _: config.Con
     var buf: [1]u8 = undefined;
     const bytes_read = stdin.read(&buf) catch 0;
     const confirmed = bytes_read > 0 and (buf[0] == 'y' or buf[0] == 'Y');
+    var discard: [16]u8 = undefined;
+    _ = stdin.read(&discard) catch {};
     if (!confirmed) {
         std.debug.print("Cancelled.\n", .{});
         return;
