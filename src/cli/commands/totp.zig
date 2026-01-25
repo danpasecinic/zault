@@ -18,12 +18,12 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.C
 
     if (std.mem.eql(u8, subcommand, "add")) {
         try runAdd(allocator, args[1..]);
-    } else if (std.mem.eql(u8, subcommand, "remove")) {
+    } else if (std.mem.eql(u8, subcommand, "delete")) {
         if (args.len < 2) {
-            std.debug.print("Usage: zault totp remove <name>\n", .{});
+            std.debug.print("Usage: zault totp delete <name>\n", .{});
             return;
         }
-        try runRemove(allocator, args[1]);
+        try runDelete(allocator, args[1]);
     } else if (std.mem.eql(u8, subcommand, "list")) {
         try runList(allocator);
     } else if (std.mem.eql(u8, subcommand, "help") or std.mem.eql(u8, subcommand, "--help")) {
@@ -153,7 +153,7 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     std.debug.print("TOTP entry '{s}' added successfully.\n", .{entry_name});
 }
 
-fn runRemove(allocator: std.mem.Allocator, entry_name: []const u8) !void {
+fn runDelete(allocator: std.mem.Allocator, entry_name: []const u8) !void {
     var ctx = vault_helpers.openAndUnlock(allocator) catch return;
     defer ctx.deinit();
 
@@ -316,14 +316,14 @@ fn showHelp() void {
         \\
         \\Subcommands:
         \\    add <name>      Add TOTP to entry (or create standalone)
-        \\    remove <name>   Remove TOTP from entry
+        \\    delete <name>   Remove TOTP from entry
         \\    list            List all entries with TOTP
         \\    <name>          Get current TOTP code for entry
         \\
         \\Examples:
         \\    zault totp add github.com
         \\    zault totp github.com
-        \\    zault totp remove github.com
+        \\    zault totp delete github.com
         \\    zault totp list
         \\
     ;
