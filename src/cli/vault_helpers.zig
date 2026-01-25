@@ -2,6 +2,7 @@ const std = @import("std");
 const core = @import("../core/vault.zig");
 const terminal = @import("terminal.zig");
 const memory = @import("../memory/secure_allocator.zig");
+const agent = @import("../services/agent.zig");
 
 pub const OpenError = error{
     VaultPathError,
@@ -46,6 +47,30 @@ pub fn openAndUnlock(allocator: std.mem.Allocator) OpenError!VaultContext {
         }
     };
     errdefer vault.deinit();
+
+    var client = agent.AgentClient.init(allocator) catch null;
+    defer if (client) |*c| c.deinit();
+
+    if (client) |*c| {
+        if (c.getKey()) |key| {
+            var mutable_key = key;
+            defer memory.secureZero(&mutable_key);
+            vault.unlockWithKey(key) catch |err| {
+                if (err != core.VaultError.InvalidMasterPassword) {
+                    std.log.warn("Agent key failed: {}", .{err});
+                }
+            };
+            if (!vault.is_locked) {
+                const empty_pass = allocator.alloc(u8, 0) catch return OpenError.PasswordReadError;
+                return VaultContext{
+                    .vault = vault,
+                    .vault_path = vault_path,
+                    .password = empty_pass,
+                    .allocator = allocator,
+                };
+            }
+        } else |_| {}
+    }
 
     const password = terminal.readPassword(allocator, "Master password: ") catch {
         std.debug.print("Error: Could not read password\n", .{});

@@ -59,6 +59,10 @@ fn runCommand(allocator: std.mem.Allocator, cfg: config.Config, command: []const
         try commands.totp_cmd.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "passkey")) {
         try commands.passkey.run(allocator, args, cfg);
+    } else if (std.mem.eql(u8, command, "unlock")) {
+        try commands.unlock.run(allocator, args, cfg);
+    } else if (std.mem.eql(u8, command, "lock")) {
+        try commands.lock.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
         try showHelp();
     } else if (std.mem.eql(u8, command, "version") or std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
@@ -85,6 +89,8 @@ fn showHelp() !void {
         \\    generate          Generate a secure password
         \\    totp <subcommand> TOTP operations (add, list, get)
         \\    passkey <subcmd>  Passkey operations (list, delete)
+        \\    unlock            Unlock vault and start agent
+        \\    lock              Lock vault and stop agent
         \\    help              Show this help message
         \\    version           Show version information
         \\

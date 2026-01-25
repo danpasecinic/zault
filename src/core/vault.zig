@@ -219,13 +219,26 @@ pub const Vault = struct {
             &self.header.salt,
             params,
         );
-        errdefer {
-            if (self.derived_key) |*key| {
-                memory.secureZero(key);
-                self.derived_key = null;
-            }
-        }
+        errdefer self.clearKey();
 
+        try self.decryptAndLoadEntries();
+    }
+
+    pub fn unlockWithKey(self: *Self, key: [argon2.key_length]u8) !void {
+        self.derived_key = key;
+        errdefer self.clearKey();
+
+        try self.decryptAndLoadEntries();
+    }
+
+    fn clearKey(self: *Self) void {
+        if (self.derived_key) |*k| {
+            memory.secureZero(k);
+            self.derived_key = null;
+        }
+    }
+
+    fn decryptAndLoadEntries(self: *Self) !void {
         const file = std.fs.cwd().openFile(self.path, .{}) catch return VaultError.VaultNotFound;
         defer file.close();
 
@@ -287,12 +300,7 @@ pub const Vault = struct {
             e.deinit(self.allocator);
         }
         self.entries.clearRetainingCapacity();
-
-        if (self.derived_key) |*key| {
-            memory.secureZero(key);
-            self.derived_key = null;
-        }
-
+        self.clearKey();
         self.is_locked = true;
     }
 
