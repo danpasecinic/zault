@@ -88,17 +88,44 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         std.debug.print("Error: Could not read secret\n", .{});
         return;
     };
-    defer {
-        memory.secureZero(secret);
-        allocator.free(secret);
-    }
 
     if (secret.len == 0) {
+        allocator.free(secret);
         std.debug.print("Error: Secret cannot be empty\n", .{});
         return;
     }
 
+    const existing = vault.getEntry(entry_name);
+    if (existing) |e| {
+        if (e.entry_type == .password) {
+            if (e.data.password.totp_secret) |old_secret| {
+                @memset(@constCast(old_secret), 0);
+                allocator.free(old_secret);
+            }
+            e.data.password.totp_secret = secret;
+            e.data.password.totp_algorithm = .sha1;
+            e.data.password.totp_digits = 6;
+            e.data.password.totp_period = 30;
+            e.modified_at = std.time.timestamp();
+
+            vault.save() catch {
+                std.debug.print("Error: Could not save vault\n", .{});
+                return;
+            };
+
+            std.debug.print("TOTP added to existing entry '{s}'.\n", .{entry_name});
+            return;
+        } else {
+            memory.secureZero(secret);
+            allocator.free(secret);
+            std.debug.print("Error: Entry '{s}' exists but is not a password entry\n", .{entry_name});
+            return;
+        }
+    }
+
     const issuer = terminal.readLine(allocator, "Issuer (optional): ") catch {
+        memory.secureZero(secret);
+        allocator.free(secret);
         std.debug.print("Error: Could not read issuer\n", .{});
         return;
     };
@@ -114,6 +141,8 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         6,
         30,
     ) catch {
+        memory.secureZero(secret);
+        allocator.free(secret);
         std.debug.print("Error: Could not create entry\n", .{});
         return;
     };
@@ -190,42 +219,57 @@ fn runGet(allocator: std.mem.Allocator, entry_name: []const u8, cfg: config.Conf
     const e = found_entry.?;
     switch (e.data) {
         .totp => |t| {
-            const algorithm: totp.Algorithm = switch (t.algorithm) {
-                .sha1 => .sha1,
-                .sha256 => .sha256,
-                .sha512 => .sha512,
-            };
-
-            const code = totp.generateCurrent(t.secret, t.period, t.digits, algorithm) catch {
-                std.debug.print("Error: Could not generate TOTP code\n", .{});
-                return;
-            };
-
-            const remaining = totp.getTimeRemaining(t.period);
-
-            var code_str: [8]u8 = undefined;
-            defer memory.secureZero(&code_str);
-
-            const code_slice = std.fmt.bufPrint(&code_str, "{d:0>6}", .{code}) catch {
-                std.debug.print("Error: Could not format TOTP code\n", .{});
-                return;
-            };
-
-            std.debug.print("{s} (expires in {d}s)\n", .{ code_slice, remaining });
-
-            if (cfg.clipboard_enabled) {
-                clipboard.copyWithTimeout(allocator, code_slice, cfg.clipboard_timeout) catch {
-                    return;
-                };
-                std.debug.print("Copied to clipboard.\n", .{});
-            }
+            try generateAndShowCode(allocator, t.secret, t.algorithm, t.digits, t.period, cfg);
         },
-        .password => {
-            std.debug.print("Entry '{s}' is a password entry. Use 'zault get {s}' instead.\n", .{ entry_name, entry_name });
+        .password => |p| {
+            if (p.totp_secret) |secret| {
+                try generateAndShowCode(allocator, secret, p.totp_algorithm, p.totp_digits, p.totp_period, cfg);
+            } else {
+                std.debug.print("Entry '{s}' has no TOTP configured. Use 'zault totp add {s}' to add one.\n", .{ entry_name, entry_name });
+            }
         },
         .passkey => {
             std.debug.print("Entry '{s}' is a passkey entry.\n", .{entry_name});
         },
+    }
+}
+
+fn generateAndShowCode(
+    allocator: std.mem.Allocator,
+    secret: []const u8,
+    algorithm: entry.TotpAlgorithm,
+    digits: u8,
+    period: u32,
+    cfg: config.Config,
+) !void {
+    const algo: totp.Algorithm = switch (algorithm) {
+        .sha1 => .sha1,
+        .sha256 => .sha256,
+        .sha512 => .sha512,
+    };
+
+    const code = totp.generateCurrent(secret, period, digits, algo) catch {
+        std.debug.print("Error: Could not generate TOTP code\n", .{});
+        return;
+    };
+
+    const remaining = totp.getTimeRemaining(period);
+
+    var code_str: [8]u8 = undefined;
+    defer memory.secureZero(&code_str);
+
+    const code_slice = std.fmt.bufPrint(&code_str, "{d:0>6}", .{code}) catch {
+        std.debug.print("Error: Could not format TOTP code\n", .{});
+        return;
+    };
+
+    std.debug.print("{s} (expires in {d}s)\n", .{ code_slice, remaining });
+
+    if (cfg.clipboard_enabled) {
+        clipboard.copyWithTimeout(allocator, code_slice, cfg.clipboard_timeout) catch {
+            return;
+        };
+        std.debug.print("Copied to clipboard.\n", .{});
     }
 }
 
@@ -274,6 +318,8 @@ fn runList(allocator: std.mem.Allocator) !void {
     for (vault.entries.items) |e| {
         if (e.entry_type == .totp) {
             count += 1;
+        } else if (e.entry_type == .password and e.data.password.hasTotp()) {
+            count += 1;
         }
     }
 
@@ -283,13 +329,15 @@ fn runList(allocator: std.mem.Allocator) !void {
     }
 
     std.debug.print("TOTP Entries ({d}):\n", .{count});
-    std.debug.print("{s:<30} {s}\n", .{ "NAME", "ISSUER" });
-    std.debug.print("{s}\n", .{"-" ** 45});
+    std.debug.print("{s:<30} {s:<12} {s}\n", .{ "NAME", "TYPE", "ISSUER" });
+    std.debug.print("{s}\n", .{"-" ** 55});
 
     for (vault.entries.items) |e| {
         if (e.entry_type == .totp) {
             const issuer = e.data.totp.issuer orelse "";
-            std.debug.print("{s:<30} {s}\n", .{ e.name, issuer });
+            std.debug.print("{s:<30} {s:<12} {s}\n", .{ e.name, "standalone", issuer });
+        } else if (e.entry_type == .password and e.data.password.hasTotp()) {
+            std.debug.print("{s:<30} {s:<12} {s}\n", .{ e.name, "password+", "" });
         }
     }
 }
