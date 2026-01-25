@@ -56,7 +56,7 @@ fn runCommand(allocator: std.mem.Allocator, cfg: config.Config, command: []const
     } else if (std.mem.eql(u8, command, "generate")) {
         try commands.generate.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "totp")) {
-        std.debug.print("Not yet implemented\n", .{});
+        try commands.totp_cmd.run(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "passkey")) {
         std.debug.print("Not yet implemented\n", .{});
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
