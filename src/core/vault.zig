@@ -282,6 +282,71 @@ pub const Vault = struct {
         self.is_locked = false;
     }
 
+    pub fn unlockWithKey(self: *Self, key: [argon2.key_length]u8) !void {
+        self.derived_key = key;
+        errdefer {
+            if (self.derived_key) |*k| {
+                memory.secureZero(k);
+                self.derived_key = null;
+            }
+        }
+
+        const file = std.fs.cwd().openFile(self.path, .{}) catch return VaultError.VaultNotFound;
+        defer file.close();
+
+        file.seekTo(VaultHeader.SIZE) catch return VaultError.IoError;
+
+        const file_stat = file.stat() catch return VaultError.IoError;
+        if (file_stat.size < VaultHeader.SIZE) {
+            return VaultError.VaultCorrupted;
+        }
+        const encrypted_size = file_stat.size - VaultHeader.SIZE;
+
+        if (encrypted_size < xchacha.tag_length) {
+            self.is_locked = false;
+            return;
+        }
+
+        const encrypted_data = self.allocator.alloc(u8, encrypted_size) catch return VaultError.IoError;
+        defer self.allocator.free(encrypted_data);
+
+        const bytes_read = file.readAll(encrypted_data) catch return VaultError.IoError;
+        if (bytes_read != encrypted_size) {
+            return VaultError.VaultCorrupted;
+        }
+
+        const ciphertext_len = encrypted_size - xchacha.tag_length;
+        const ciphertext = encrypted_data[0..ciphertext_len];
+        const tag = encrypted_data[ciphertext_len..][0..xchacha.tag_length];
+
+        const plaintext = self.allocator.alloc(u8, ciphertext_len) catch return VaultError.IoError;
+        defer self.allocator.free(plaintext);
+
+        xchacha.decrypt(
+            plaintext,
+            ciphertext,
+            tag,
+            &self.derived_key.?,
+            &self.header.nonce,
+        ) catch return VaultError.InvalidMasterPassword;
+
+        const entries = serializer.deserializeEntries(self.allocator, plaintext) catch return VaultError.VaultCorrupted;
+
+        for (entries) |e| {
+            self.entries.append(self.allocator, e) catch {
+                for (entries) |*ent| {
+                    var mut_ent = ent.*;
+                    mut_ent.deinit(self.allocator);
+                }
+                self.allocator.free(entries);
+                return VaultError.IoError;
+            };
+        }
+        self.allocator.free(entries);
+
+        self.is_locked = false;
+    }
+
     pub fn lock(self: *Self) void {
         for (self.entries.items) |*e| {
             e.deinit(self.allocator);

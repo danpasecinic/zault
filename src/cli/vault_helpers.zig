@@ -53,17 +53,18 @@ pub fn openAndUnlock(allocator: std.mem.Allocator) OpenError!VaultContext {
 
     if (client) |*c| {
         if (c.getKey()) |key| {
-            vault.derived_key = key;
-            vault.is_locked = false;
-            var key_copy = key;
-            memory.secureZero(&key_copy);
-            const empty_pass = allocator.alloc(u8, 0) catch return OpenError.PasswordReadError;
-            return VaultContext{
-                .vault = vault,
-                .vault_path = vault_path,
-                .password = empty_pass,
-                .allocator = allocator,
-            };
+            var mutable_key = key;
+            defer memory.secureZero(&mutable_key);
+            vault.unlockWithKey(key) catch {};
+            if (!vault.is_locked) {
+                const empty_pass = allocator.alloc(u8, 0) catch return OpenError.PasswordReadError;
+                return VaultContext{
+                    .vault = vault,
+                    .vault_path = vault_path,
+                    .password = empty_pass,
+                    .allocator = allocator,
+                };
+            }
         } else |_| {}
     }
 
