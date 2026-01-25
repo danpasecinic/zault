@@ -43,14 +43,12 @@ pub fn main() !void {
 }
 
 fn runCommand(allocator: std.mem.Allocator, cfg: config.Config, command: []const u8, args: []const []const u8) !void {
-    _ = cfg;
-
     if (std.mem.eql(u8, command, "init")) {
         try cmdInit(allocator);
     } else if (std.mem.eql(u8, command, "add")) {
         try cmdAdd(allocator, args);
     } else if (std.mem.eql(u8, command, "get")) {
-        try cmdGet();
+        try cmdGet(allocator, args, cfg);
     } else if (std.mem.eql(u8, command, "list")) {
         try cmdList();
     } else if (std.mem.eql(u8, command, "delete")) {
@@ -247,8 +245,93 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     std.debug.print("Entry '{s}' added successfully.\n", .{entry_name});
 }
 
-fn cmdGet() !void {
-    std.debug.print("Not yet implemented\n", .{});
+fn cmdGet(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.Config) !void {
+    if (args.len == 0) {
+        std.debug.print("Usage: zault get <name>\n", .{});
+        return;
+    }
+
+    const entry_name = args[0];
+
+    const vault_path = core.getDefaultVaultDataPath(allocator) catch {
+        std.debug.print("Error: Could not determine vault path\n", .{});
+        return;
+    };
+    defer allocator.free(vault_path);
+
+    var vault = core.Vault.open(allocator, vault_path) catch |err| {
+        switch (err) {
+            core.VaultError.VaultNotFound => {
+                std.debug.print("Error: No vault found. Run 'zault init' first.\n", .{});
+            },
+            else => {
+                std.debug.print("Error: Could not open vault\n", .{});
+            },
+        }
+        return;
+    };
+    defer vault.deinit();
+
+    const password = terminal.readPassword(allocator, "Master password: ") catch {
+        std.debug.print("Error: Could not read password\n", .{});
+        return;
+    };
+    defer {
+        memory.secureZero(password);
+        allocator.free(password);
+    }
+
+    vault.unlock(password) catch |err| {
+        switch (err) {
+            core.VaultError.InvalidMasterPassword => {
+                std.debug.print("Error: Invalid master password\n", .{});
+            },
+            else => {
+                std.debug.print("Error: Could not unlock vault\n", .{});
+            },
+        }
+        return;
+    };
+
+    const found_entry = vault.getEntry(entry_name);
+    if (found_entry == null) {
+        std.debug.print("Error: Entry '{s}' not found\n", .{entry_name});
+        return;
+    }
+
+    const e = found_entry.?;
+    switch (e.data) {
+        .password => |pwd| {
+            if (!cfg.clipboard_enabled) {
+                std.debug.print("Clipboard disabled in config. Password for '{s}':\n{s}\n", .{ entry_name, pwd.password });
+                return;
+            }
+
+            clipboard.copyWithTimeout(allocator, pwd.password, cfg.clipboard_timeout) catch {
+                std.debug.print("Error: Could not copy to clipboard. Password:\n{s}\n", .{pwd.password});
+                return;
+            };
+
+            std.debug.print("Password for '{s}' copied to clipboard.", .{entry_name});
+            if (cfg.clipboard_timeout > 0) {
+                std.debug.print(" Clearing in {d}s.", .{cfg.clipboard_timeout});
+            }
+            std.debug.print("\n", .{});
+
+            if (pwd.username) |u| {
+                std.debug.print("Username: {s}\n", .{u});
+            }
+            if (pwd.url) |url| {
+                std.debug.print("URL: {s}\n", .{url});
+            }
+        },
+        .totp => {
+            std.debug.print("Entry '{s}' is a TOTP entry. Use 'zault totp {s}' instead.\n", .{ entry_name, entry_name });
+        },
+        .passkey => {
+            std.debug.print("Entry '{s}' is a passkey entry.\n", .{entry_name});
+        },
+    }
 }
 
 fn cmdList() !void {
