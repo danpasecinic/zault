@@ -204,8 +204,48 @@ pub const LoginData = struct {
 
 pub const SecureNoteData = struct {};
 
+pub const CardBrand = enum(u8) {
+    visa = 1,
+    mastercard = 2,
+    amex = 3,
+    discover = 4,
+    diners = 5,
+    jcb = 6,
+    unionpay = 7,
+    other = 255,
+};
+
 pub const CardData = struct {
-    pub fn deinit(_: *CardData, _: std.mem.Allocator) void {}
+    cardholder_name: ?[]const u8 = null,
+    number: ?[]const u8 = null,
+    brand: ?CardBrand = null,
+    exp_month: ?u8 = null,
+    exp_year: ?u16 = null,
+    cvv: ?[]const u8 = null,
+    pin: ?[]const u8 = null,
+
+    pub fn deinit(self: *CardData, allocator: std.mem.Allocator) void {
+        if (self.cardholder_name) |n| allocator.free(n);
+        if (self.number) |n| {
+            @memset(@constCast(n), 0);
+            allocator.free(n);
+        }
+        if (self.cvv) |c| {
+            @memset(@constCast(c), 0);
+            allocator.free(c);
+        }
+        if (self.pin) |p| {
+            @memset(@constCast(p), 0);
+            allocator.free(p);
+        }
+    }
+
+    pub fn lastFour(self: *const CardData) ?[]const u8 {
+        if (self.number) |n| {
+            if (n.len >= 4) return n[n.len - 4 ..];
+        }
+        return null;
+    }
 };
 
 pub const IdentityData = struct {
@@ -254,4 +294,17 @@ test "login data deinit clears password" {
     };
 
     login.deinit(allocator);
+}
+
+test "card data deinit clears sensitive fields" {
+    const allocator = std.testing.allocator;
+
+    var card = CardData{
+        .cardholder_name = try allocator.dupe(u8, "John Doe"),
+        .number = try allocator.dupe(u8, "4111111111111111"),
+        .cvv = try allocator.dupe(u8, "123"),
+        .pin = try allocator.dupe(u8, "1234"),
+    };
+
+    card.deinit(allocator);
 }
