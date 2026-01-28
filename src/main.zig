@@ -83,8 +83,8 @@ fn showHelp() !void {
         \\    init              Create a new vault
         \\    add <name>        Add a new credential
         \\    get <name>        Retrieve a credential (copies to clipboard)
-        \\    list              List all entries
-        \\    delete <name>     Remove an entry
+        \\    list              List all items
+        \\    delete <name>     Remove an item
         \\    generate          Generate a secure password
         \\    totp <subcommand> TOTP operations (add, list, get)
         \\    passkey <subcmd>  Passkey operations (list, delete)
