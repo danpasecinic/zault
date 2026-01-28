@@ -1,5 +1,5 @@
 const std = @import("std");
-const entry = @import("entry.zig");
+const item = @import("item.zig");
 const serializer = @import("serializer.zig");
 const argon2 = @import("../crypto/argon2.zig");
 const xchacha = @import("../crypto/xchacha.zig");
@@ -10,8 +10,8 @@ pub const VaultError = error{
     VaultLocked,
     VaultCorrupted,
     InvalidMasterPassword,
-    EntryNotFound,
-    EntryAlreadyExists,
+    ItemNotFound,
+    ItemAlreadyExists,
     IoError,
     CryptoError,
     InvalidMagic,
@@ -129,7 +129,7 @@ pub const VaultHeader = struct {
 pub const Vault = struct {
     allocator: std.mem.Allocator,
     header: VaultHeader,
-    entries: std.ArrayList(entry.Entry),
+    items: std.ArrayList(item.Item),
     is_locked: bool,
     path: []const u8,
     derived_key: ?[argon2.key_length]u8,
@@ -143,7 +143,7 @@ pub const Vault = struct {
                 .salt = undefined,
                 .nonce = undefined,
             },
-            .entries = .empty,
+            .items = .empty,
             .is_locked = true,
             .path = path,
             .derived_key = null,
@@ -151,10 +151,10 @@ pub const Vault = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        for (self.entries.items) |*e| {
-            e.deinit(self.allocator);
+        for (self.items.items) |*i| {
+            i.deinit(self.allocator);
         }
-        self.entries.deinit(self.allocator);
+        self.items.deinit(self.allocator);
 
         if (self.derived_key) |*key| {
             memory.secureZero(key);
@@ -199,7 +199,7 @@ pub const Vault = struct {
         return Self{
             .allocator = allocator,
             .header = header,
-            .entries = .empty,
+            .items = .empty,
             .is_locked = true,
             .path = path,
             .derived_key = null,
@@ -221,14 +221,14 @@ pub const Vault = struct {
         );
         errdefer self.clearKey();
 
-        try self.decryptAndLoadEntries();
+        try self.decryptAndLoadItems();
     }
 
     pub fn unlockWithKey(self: *Self, key: [argon2.key_length]u8) !void {
         self.derived_key = key;
         errdefer self.clearKey();
 
-        try self.decryptAndLoadEntries();
+        try self.decryptAndLoadItems();
     }
 
     fn clearKey(self: *Self) void {
@@ -238,7 +238,7 @@ pub const Vault = struct {
         }
     }
 
-    fn decryptAndLoadEntries(self: *Self) !void {
+    fn decryptAndLoadItems(self: *Self) !void {
         const file = std.fs.cwd().openFile(self.path, .{}) catch return VaultError.VaultNotFound;
         defer file.close();
 
@@ -278,28 +278,28 @@ pub const Vault = struct {
             &self.header.nonce,
         ) catch return VaultError.InvalidMasterPassword;
 
-        const entries = serializer.deserializeEntries(self.allocator, plaintext) catch return VaultError.VaultCorrupted;
+        const items_slice = serializer.deserializeItems(self.allocator, plaintext) catch return VaultError.VaultCorrupted;
 
-        for (entries) |e| {
-            self.entries.append(self.allocator, e) catch {
-                for (entries) |*ent| {
-                    var mut_ent = ent.*;
-                    mut_ent.deinit(self.allocator);
+        for (items_slice) |i| {
+            self.items.append(self.allocator, i) catch {
+                for (items_slice) |*it| {
+                    var mut_it = it.*;
+                    mut_it.deinit(self.allocator);
                 }
-                self.allocator.free(entries);
+                self.allocator.free(items_slice);
                 return VaultError.IoError;
             };
         }
-        self.allocator.free(entries);
+        self.allocator.free(items_slice);
 
         self.is_locked = false;
     }
 
     pub fn lock(self: *Self) void {
-        for (self.entries.items) |*e| {
-            e.deinit(self.allocator);
+        for (self.items.items) |*i| {
+            i.deinit(self.allocator);
         }
-        self.entries.clearRetainingCapacity();
+        self.items.clearRetainingCapacity();
         self.clearKey();
         self.is_locked = true;
     }
@@ -313,7 +313,7 @@ pub const Vault = struct {
 
         std.crypto.random.bytes(&self.header.nonce);
 
-        const plaintext = serializer.serializeEntries(self.allocator, self.entries.items) catch return VaultError.IoError;
+        const plaintext = serializer.serializeItems(self.allocator, self.items.items) catch return VaultError.IoError;
         defer {
             memory.secureZero(plaintext);
             self.allocator.free(plaintext);
@@ -340,48 +340,48 @@ pub const Vault = struct {
         file.writeAll(&tag) catch return VaultError.IoError;
     }
 
-    pub fn addEntry(self: *Self, new_entry: entry.Entry) !void {
+    pub fn addItem(self: *Self, new_item: item.Item) !void {
         if (self.is_locked) {
             return VaultError.VaultLocked;
         }
 
-        for (self.entries.items) |e| {
-            if (std.mem.eql(u8, e.name, new_entry.name)) {
-                return VaultError.EntryAlreadyExists;
+        for (self.items.items) |i| {
+            if (std.mem.eql(u8, i.name, new_item.name)) {
+                return VaultError.ItemAlreadyExists;
             }
         }
 
-        try self.entries.append(self.allocator, new_entry);
+        try self.items.append(self.allocator, new_item);
     }
 
-    pub fn getEntry(self: *Self, name: []const u8) ?*entry.Entry {
+    pub fn getItem(self: *Self, name: []const u8) ?*item.Item {
         if (self.is_locked) {
             return null;
         }
 
-        for (self.entries.items) |*e| {
-            if (std.mem.eql(u8, e.name, name)) {
-                return e;
+        for (self.items.items) |*i| {
+            if (std.mem.eql(u8, i.name, name)) {
+                return i;
             }
         }
 
         return null;
     }
 
-    pub fn deleteEntry(self: *Self, name: []const u8) !void {
+    pub fn deleteItem(self: *Self, name: []const u8) !void {
         if (self.is_locked) {
             return VaultError.VaultLocked;
         }
 
-        for (self.entries.items, 0..) |*e, i| {
-            if (std.mem.eql(u8, e.name, name)) {
-                e.deinit(self.allocator);
-                _ = self.entries.orderedRemove(i);
+        for (self.items.items, 0..) |*i, idx| {
+            if (std.mem.eql(u8, i.name, name)) {
+                i.deinit(self.allocator);
+                _ = self.items.orderedRemove(idx);
                 return;
             }
         }
 
-        return VaultError.EntryNotFound;
+        return VaultError.ItemNotFound;
     }
 };
 
@@ -432,7 +432,7 @@ test "vault init" {
     defer vault.deinit();
 
     try std.testing.expect(vault.is_locked);
-    try std.testing.expectEqual(@as(usize, 0), vault.entries.items.len);
+    try std.testing.expectEqual(@as(usize, 0), vault.items.items.len);
 }
 
 test "vault header serialize deserialize" {
@@ -460,14 +460,14 @@ test "vault create save open unlock roundtrip" {
         var vault = try Vault.create(allocator, test_path, "testpassword123");
         defer vault.deinit();
 
-        const e = try entry.createPasswordEntry(
+        const i = try item.createLoginItem(
             allocator,
             "github.com",
             "testuser",
             "secretpassword",
             "https://github.com",
         );
-        try vault.addEntry(e);
+        try vault.addItem(i);
 
         try vault.save();
     }
@@ -481,11 +481,11 @@ test "vault create save open unlock roundtrip" {
         try vault.unlock("testpassword123");
 
         try std.testing.expect(!vault.is_locked);
-        try std.testing.expectEqual(@as(usize, 1), vault.entries.items.len);
+        try std.testing.expectEqual(@as(usize, 1), vault.items.items.len);
 
-        const retrieved = vault.getEntry("github.com");
+        const retrieved = vault.getItem("github.com");
         try std.testing.expect(retrieved != null);
-        try std.testing.expectEqualStrings("testuser", retrieved.?.data.password.username.?);
+        try std.testing.expectEqualStrings("testuser", retrieved.?.data.login.username.?);
     }
 }
 
@@ -499,8 +499,8 @@ test "vault wrong password fails" {
         var vault = try Vault.create(allocator, test_path, "correctpassword");
         defer vault.deinit();
 
-        const e = try entry.createPasswordEntry(allocator, "test", null, "pass", null);
-        try vault.addEntry(e);
+        const i = try item.createLoginItem(allocator, "test", null, "pass", null);
+        try vault.addItem(i);
         try vault.save();
     }
 

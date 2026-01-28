@@ -1,7 +1,7 @@
 const std = @import("std");
 const core = @import("../../core/vault.zig");
 const config = @import("../../core/config.zig");
-const entry = @import("../../core/entry.zig");
+const item = @import("../../core/item.zig");
 const terminal = @import("../terminal.zig");
 const memory = @import("../../memory/secure_allocator.zig");
 const clipboard = @import("../../services/clipboard.zig");
@@ -37,22 +37,22 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var ctx = vault_helpers.openAndUnlock(allocator) catch return;
     defer ctx.deinit();
 
-    const entry_name = if (args.len > 0)
+    const item_name = if (args.len > 0)
         args[0]
     else blk: {
-        const name = terminal.readLine(allocator, "Entry name: ") catch {
-            std.debug.print("Error: Could not read entry name\n", .{});
+        const name = terminal.readLine(allocator, "Item name: ") catch {
+            std.debug.print("Error: Could not read item name\n", .{});
             return;
         };
         if (name.len == 0) {
             allocator.free(name);
-            std.debug.print("Error: Entry name cannot be empty\n", .{});
+            std.debug.print("Error: Item name cannot be empty\n", .{});
             return;
         }
         break :blk name;
     };
     const should_free_name = args.len == 0;
-    defer if (should_free_name) allocator.free(entry_name);
+    defer if (should_free_name) allocator.free(item_name);
 
     const secret = terminal.readPassword(allocator, "TOTP Secret (base32): ") catch {
         std.debug.print("Error: Could not read secret\n", .{});
@@ -79,160 +79,101 @@ fn runAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     };
 
-    const existing = ctx.vault.getEntry(entry_name);
-    if (existing) |e| {
-        if (e.entry_type == .password) {
-            if (e.data.password.totp_secret) |old_secret| {
-                @memset(@constCast(old_secret), 0);
-                allocator.free(old_secret);
-            }
-            e.data.password.totp_secret = secret;
-            e.data.password.totp_algorithm = .sha1;
-            e.data.password.totp_digits = 6;
-            e.data.password.totp_period = 30;
-            e.modified_at = std.time.timestamp();
-
-            ctx.vault.save() catch {
-                std.debug.print("Error: Could not save vault\n", .{});
-                return;
-            };
-
-            std.debug.print("TOTP added to existing entry '{s}'.\n", .{entry_name});
-            return;
-        } else {
+    const existing = ctx.vault.getItem(item_name);
+    if (existing) |i| {
+        if (i.item_type != .login) {
             memory.secureZero(secret);
             allocator.free(secret);
-            std.debug.print("Error: Entry '{s}' exists but is not a password entry\n", .{entry_name});
+            std.debug.print("Error: Item '{s}' is not a login item\n", .{item_name});
             return;
         }
+
+        if (i.data.login.totp) |*old_totp| {
+            old_totp.deinit(allocator);
+        }
+
+        i.data.login.totp = .{
+            .secret = secret,
+            .algorithm = .sha1,
+            .digits = 6,
+            .period = 30,
+        };
+        i.modified_at = std.time.timestamp();
+
+        ctx.vault.save() catch {
+            std.debug.print("Error: Could not save vault\n", .{});
+            return;
+        };
+
+        std.debug.print("TOTP added to existing item '{s}'.\n", .{item_name});
+        return;
     }
 
-    const issuer = terminal.readLine(allocator, "Issuer (optional): ") catch {
-        memory.secureZero(secret);
-        allocator.free(secret);
-        std.debug.print("Error: Could not read issuer\n", .{});
-        return;
-    };
-    defer allocator.free(issuer);
-    const issuer_opt: ?[]const u8 = if (issuer.len > 0) issuer else null;
+    memory.secureZero(secret);
+    allocator.free(secret);
+    std.debug.print("Error: Item '{s}' not found. Create it first with 'zault add {s}'.\n", .{ item_name, item_name });
+}
 
-    const new_entry = entry.createTotpEntry(
-        allocator,
-        entry_name,
-        secret,
-        issuer_opt,
-        .sha1,
-        6,
-        30,
-    ) catch {
-        memory.secureZero(secret);
-        allocator.free(secret);
-        std.debug.print("Error: Could not create entry\n", .{});
-        return;
-    };
+fn runDelete(allocator: std.mem.Allocator, item_name: []const u8) !void {
+    var ctx = vault_helpers.openAndUnlock(allocator) catch return;
+    defer ctx.deinit();
 
-    ctx.vault.addEntry(new_entry) catch |err| {
-        var mutable_entry = new_entry;
-        mutable_entry.deinit(allocator);
-        switch (err) {
-            core.VaultError.EntryAlreadyExists => {
-                std.debug.print("Error: Entry '{s}' already exists\n", .{entry_name});
-            },
-            else => {
-                std.debug.print("Error: Could not add entry\n", .{});
-            },
-        }
+    const found_item = ctx.vault.getItem(item_name);
+    if (found_item == null) {
+        std.debug.print("Error: Item '{s}' not found\n", .{item_name});
         return;
-    };
+    }
+
+    const i = found_item.?;
+    if (i.item_type != .login) {
+        std.debug.print("Error: Item '{s}' is not a login item\n", .{item_name});
+        return;
+    }
+
+    if (i.data.login.totp == null) {
+        std.debug.print("Item '{s}' has no TOTP configured.\n", .{item_name});
+        return;
+    }
+
+    i.data.login.totp.?.deinit(allocator);
+    i.data.login.totp = null;
+    i.modified_at = std.time.timestamp();
 
     ctx.vault.save() catch {
         std.debug.print("Error: Could not save vault\n", .{});
         return;
     };
-
-    std.debug.print("TOTP entry '{s}' added successfully.\n", .{entry_name});
+    std.debug.print("TOTP removed from '{s}'.\n", .{item_name});
 }
 
-fn runDelete(allocator: std.mem.Allocator, entry_name: []const u8) !void {
+fn runGet(allocator: std.mem.Allocator, item_name: []const u8, cfg: config.Config) !void {
     var ctx = vault_helpers.openAndUnlock(allocator) catch return;
     defer ctx.deinit();
 
-    const found_entry = ctx.vault.getEntry(entry_name);
-    if (found_entry == null) {
-        std.debug.print("Error: Entry '{s}' not found\n", .{entry_name});
+    const found_item = ctx.vault.getItem(item_name);
+    if (found_item == null) {
+        std.debug.print("Error: Item '{s}' not found\n", .{item_name});
         return;
     }
 
-    const e = found_entry.?;
-    switch (e.data) {
-        .totp => {
-            ctx.vault.deleteEntry(entry_name) catch {
-                std.debug.print("Error: Could not delete entry\n", .{});
-                return;
-            };
-            ctx.vault.save() catch {
-                std.debug.print("Error: Could not save vault\n", .{});
-                return;
-            };
-            std.debug.print("TOTP entry '{s}' deleted.\n", .{entry_name});
-        },
-        .password => |*p| {
-            if (p.totp_secret == null) {
-                std.debug.print("Entry '{s}' has no TOTP configured.\n", .{entry_name});
-                return;
-            }
-            @memset(@constCast(p.totp_secret.?), 0);
-            allocator.free(p.totp_secret.?);
-            p.totp_secret = null;
-            p.totp_algorithm = .sha1;
-            p.totp_digits = 6;
-            p.totp_period = 30;
-            e.modified_at = std.time.timestamp();
-
-            ctx.vault.save() catch {
-                std.debug.print("Error: Could not save vault\n", .{});
-                return;
-            };
-            std.debug.print("TOTP removed from '{s}'.\n", .{entry_name});
-        },
-        .passkey => {
-            std.debug.print("Entry '{s}' is a passkey, not a TOTP entry.\n", .{entry_name});
-        },
-    }
-}
-
-fn runGet(allocator: std.mem.Allocator, entry_name: []const u8, cfg: config.Config) !void {
-    var ctx = vault_helpers.openAndUnlock(allocator) catch return;
-    defer ctx.deinit();
-
-    const found_entry = ctx.vault.getEntry(entry_name);
-    if (found_entry == null) {
-        std.debug.print("Error: Entry '{s}' not found\n", .{entry_name});
+    const i = found_item.?;
+    if (i.item_type != .login) {
+        std.debug.print("Error: Item '{s}' is not a login item\n", .{item_name});
         return;
     }
 
-    const e = found_entry.?;
-    switch (e.data) {
-        .totp => |t| {
-            try generateAndShowCode(allocator, t.secret, t.algorithm, t.digits, t.period, cfg);
-        },
-        .password => |p| {
-            if (p.totp_secret) |secret| {
-                try generateAndShowCode(allocator, secret, p.totp_algorithm, p.totp_digits, p.totp_period, cfg);
-            } else {
-                std.debug.print("Entry '{s}' has no TOTP configured. Use 'zault totp add {s}' to add one.\n", .{ entry_name, entry_name });
-            }
-        },
-        .passkey => {
-            std.debug.print("Entry '{s}' is a passkey entry.\n", .{entry_name});
-        },
-    }
+    const t = i.data.login.totp orelse {
+        std.debug.print("Item '{s}' has no TOTP configured. Use 'zault totp add {s}' to add one.\n", .{ item_name, item_name });
+        return;
+    };
+
+    try generateAndShowCode(allocator, t.secret, t.algorithm, t.digits, t.period, cfg);
 }
 
 fn generateAndShowCode(
     allocator: std.mem.Allocator,
     secret: []const u8,
-    algorithm: entry.TotpAlgorithm,
+    algorithm: item.TotpAlgorithm,
     digits: u8,
     period: u32,
     cfg: config.Config,
@@ -283,29 +224,25 @@ fn runList(allocator: std.mem.Allocator) !void {
     defer ctx.deinit();
 
     var count: usize = 0;
-    for (ctx.vault.entries.items) |e| {
-        if (e.entry_type == .totp) {
-            count += 1;
-        } else if (e.entry_type == .password and e.data.password.hasTotp()) {
+    for (ctx.vault.items.items) |i| {
+        if (i.item_type == .login and i.data.login.totp != null) {
             count += 1;
         }
     }
 
     if (count == 0) {
-        std.debug.print("No TOTP entries. Use 'zault totp add <name>' to add one.\n", .{});
+        std.debug.print("No items with TOTP. Use 'zault totp add <name>' to add one.\n", .{});
         return;
     }
 
-    std.debug.print("TOTP Entries ({d}):\n", .{count});
-    std.debug.print("{s:<30} {s:<12} {s}\n", .{ "NAME", "TYPE", "ISSUER" });
-    std.debug.print("{s}\n", .{"-" ** 55});
+    std.debug.print("Items with TOTP ({d}):\n", .{count});
+    std.debug.print("{s:<30} {s}\n", .{ "NAME", "USERNAME" });
+    std.debug.print("{s}\n", .{"-" ** 45});
 
-    for (ctx.vault.entries.items) |e| {
-        if (e.entry_type == .totp) {
-            const issuer = e.data.totp.issuer orelse "";
-            std.debug.print("{s:<30} {s:<12} {s}\n", .{ e.name, "standalone", issuer });
-        } else if (e.entry_type == .password and e.data.password.hasTotp()) {
-            std.debug.print("{s:<30} {s:<12} {s}\n", .{ e.name, "password+", "" });
+    for (ctx.vault.items.items) |i| {
+        if (i.item_type == .login and i.data.login.totp != null) {
+            const username = i.data.login.username orelse "";
+            std.debug.print("{s:<30} {s}\n", .{ i.name, username });
         }
     }
 }
@@ -315,10 +252,10 @@ fn showHelp() void {
         \\Usage: zault totp <subcommand> [options]
         \\
         \\Subcommands:
-        \\    add <name>      Add TOTP to entry (or create standalone)
-        \\    delete <name>   Remove TOTP from entry
-        \\    list            List all entries with TOTP
-        \\    <name>          Get current TOTP code for entry
+        \\    add <name>      Add TOTP to a login item
+        \\    delete <name>   Remove TOTP from a login item
+        \\    list            List all items with TOTP
+        \\    <name>          Get current TOTP code for item
         \\
         \\Examples:
         \\    zault totp add github.com

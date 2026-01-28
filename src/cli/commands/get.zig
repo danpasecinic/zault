@@ -9,48 +9,75 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, cfg: config.C
         return;
     }
 
-    const entry_name = args[0];
+    const item_name = args[0];
 
     var ctx = vault_helpers.openAndUnlock(allocator) catch return;
     defer ctx.deinit();
 
-    const found_entry = ctx.vault.getEntry(entry_name);
-    if (found_entry == null) {
-        std.debug.print("Error: Entry '{s}' not found\n", .{entry_name});
+    const found_item = ctx.vault.getItem(item_name);
+    if (found_item == null) {
+        std.debug.print("Error: Item '{s}' not found\n", .{item_name});
         return;
     }
 
-    const e = found_entry.?;
-    switch (e.data) {
-        .password => |pwd| {
-            if (!cfg.clipboard_enabled) {
-                std.debug.print("Clipboard disabled in config. Password for '{s}':\n{s}\n", .{ entry_name, pwd.password });
-                return;
-            }
-
-            clipboard.copyWithTimeout(allocator, pwd.password, cfg.clipboard_timeout) catch {
-                std.debug.print("Error: Could not copy to clipboard. Password:\n{s}\n", .{pwd.password});
+    const i = found_item.?;
+    switch (i.data) {
+        .login => |login| {
+            const password = login.password orelse {
+                std.debug.print("Item '{s}' has no password set.\n", .{item_name});
                 return;
             };
 
-            std.debug.print("Password for '{s}' copied to clipboard.", .{entry_name});
+            if (!cfg.clipboard_enabled) {
+                std.debug.print("Clipboard disabled in config. Password for '{s}':\n{s}\n", .{ item_name, password });
+                return;
+            }
+
+            clipboard.copyWithTimeout(allocator, password, cfg.clipboard_timeout) catch {
+                std.debug.print("Error: Could not copy to clipboard. Password:\n{s}\n", .{password});
+                return;
+            };
+
+            std.debug.print("Password for '{s}' copied to clipboard.", .{item_name});
             if (cfg.clipboard_timeout > 0) {
                 std.debug.print(" Clearing in {d}s.", .{cfg.clipboard_timeout});
             }
             std.debug.print("\n", .{});
 
-            if (pwd.username) |u| {
+            if (login.username) |u| {
                 std.debug.print("Username: {s}\n", .{u});
             }
-            if (pwd.url) |url| {
-                std.debug.print("URL: {s}\n", .{url});
+            if (login.uris.len > 0) {
+                std.debug.print("URL: {s}\n", .{login.uris[0].uri});
             }
         },
-        .totp => {
-            std.debug.print("Entry '{s}' is a TOTP entry. Use 'zault totp {s}' instead.\n", .{ entry_name, entry_name });
+        .card => {
+            std.debug.print("Item '{s}' is a card. Use 'zault card {s}' instead.\n", .{ item_name, item_name });
         },
-        .passkey => {
-            std.debug.print("Entry '{s}' is a passkey entry.\n", .{entry_name});
+        .secure_note => {
+            if (i.notes) |notes| {
+                std.debug.print("Note:\n{s}\n", .{notes});
+            } else {
+                std.debug.print("Item '{s}' has no notes.\n", .{item_name});
+            }
+        },
+        .identity => {
+            std.debug.print("Item '{s}' is an identity.\n", .{item_name});
+        },
+        .ssh_key => {
+            std.debug.print("Item '{s}' is an SSH key.\n", .{item_name});
+        },
+        .api_credential => {
+            std.debug.print("Item '{s}' is an API credential.\n", .{item_name});
+        },
+        .database => {
+            std.debug.print("Item '{s}' is a database credential.\n", .{item_name});
+        },
+        .wifi => {
+            std.debug.print("Item '{s}' is a WiFi credential.\n", .{item_name});
+        },
+        .license => {
+            std.debug.print("Item '{s}' is a software license.\n", .{item_name});
         },
     }
 }
