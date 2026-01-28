@@ -19,7 +19,7 @@ pub const VaultError = error{
 };
 
 pub const VAULT_MAGIC: [4]u8 = .{ 'Z', 'A', 'U', 'L' };
-pub const VAULT_VERSION: u16 = 1;
+pub const VAULT_VERSION: u16 = 2;
 
 pub const VaultHeader = struct {
     magic: [4]u8 = VAULT_MAGIC,

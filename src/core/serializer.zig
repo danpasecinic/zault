@@ -280,20 +280,40 @@ fn deserializeItem(allocator: std.mem.Allocator, reader: anytype) !item.Item {
 
     const fields_count = reader.readInt(u32, .little) catch return DeserializeError.UnexpectedEndOfData;
     var fields = try allocator.alloc(item.CustomField, fields_count);
-    errdefer allocator.free(fields);
+    var fields_initialized: usize = 0;
+    errdefer {
+        for (0..fields_initialized) |j| {
+            var f = fields[j];
+            f.deinit(allocator);
+        }
+        allocator.free(fields);
+    }
 
     for (0..fields_count) |i| {
         fields[i] = try deserializeCustomField(allocator, reader);
+        fields_initialized = i + 1;
     }
 
     const history_count = reader.readInt(u32, .little) catch return DeserializeError.UnexpectedEndOfData;
     var history = try allocator.alloc(item.PasswordHistoryEntry, history_count);
-    errdefer allocator.free(history);
+    var history_initialized: usize = 0;
+    errdefer {
+        for (0..history_initialized) |j| {
+            var h = history[j];
+            h.deinit(allocator);
+        }
+        allocator.free(history);
+    }
 
     for (0..history_count) |i| {
         const pw = try readString(allocator, reader);
+        errdefer {
+            @memset(@constCast(pw), 0);
+            allocator.free(pw);
+        }
         const changed_at = reader.readInt(i64, .little) catch return DeserializeError.UnexpectedEndOfData;
         history[i] = .{ .password = pw, .changed_at = changed_at };
+        history_initialized = i + 1;
     }
 
     const data = try deserializeItemData(allocator, reader, item_type);
@@ -351,23 +371,38 @@ fn deserializeLoginData(allocator: std.mem.Allocator, reader: anytype) !item.Log
     errdefer if (username) |u| allocator.free(u);
 
     const password = try readOptionalString(allocator, reader);
-    errdefer if (password) |p| allocator.free(p);
+    errdefer if (password) |p| {
+        @memset(@constCast(p), 0);
+        allocator.free(p);
+    };
 
     const uri_count = reader.readInt(u32, .little) catch return DeserializeError.UnexpectedEndOfData;
     var uris = try allocator.alloc(item.Uri, uri_count);
-    errdefer allocator.free(uris);
+    var uris_initialized: usize = 0;
+    errdefer {
+        for (0..uris_initialized) |j| {
+            allocator.free(uris[j].uri);
+        }
+        allocator.free(uris);
+    }
 
     for (0..uri_count) |i| {
         const uri_str = try readString(allocator, reader);
+        errdefer allocator.free(uri_str);
         const match_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
         const match_type = std.meta.intToEnum(item.UriMatchType, match_byte) catch return DeserializeError.InvalidData;
         uris[i] = .{ .uri = uri_str, .match_type = match_type };
+        uris_initialized = i + 1;
     }
 
     const has_totp = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     var totp: ?item.TotpData = null;
     if (has_totp == 1) {
         const secret = try readString(allocator, reader);
+        errdefer {
+            @memset(@constCast(secret), 0);
+            allocator.free(secret);
+        }
         const algo_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
         const algorithm = std.meta.intToEnum(item.TotpAlgorithm, algo_byte) catch return DeserializeError.InvalidData;
         const digits = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
@@ -379,13 +414,25 @@ fn deserializeLoginData(allocator: std.mem.Allocator, reader: anytype) !item.Log
             .period = period,
         };
     }
+    errdefer if (totp) |*t| {
+        var td = t.*;
+        td.deinit(allocator);
+    };
 
     const pk_count = reader.readInt(u32, .little) catch return DeserializeError.UnexpectedEndOfData;
     var passkeys = try allocator.alloc(item.PasskeyData, pk_count);
-    errdefer allocator.free(passkeys);
+    var passkeys_initialized: usize = 0;
+    errdefer {
+        for (0..passkeys_initialized) |j| {
+            var pk = passkeys[j];
+            pk.deinit(allocator);
+        }
+        allocator.free(passkeys);
+    }
 
     for (0..pk_count) |i| {
         passkeys[i] = try deserializePasskeyData(allocator, reader);
+        passkeys_initialized = i + 1;
     }
 
     return .{
@@ -399,14 +446,32 @@ fn deserializeLoginData(allocator: std.mem.Allocator, reader: anytype) !item.Log
 
 fn deserializePasskeyData(allocator: std.mem.Allocator, reader: anytype) !item.PasskeyData {
     const credential_id = try readString(allocator, reader);
+    errdefer allocator.free(credential_id);
+
     const private_key = try readString(allocator, reader);
+    errdefer {
+        @memset(@constCast(private_key), 0);
+        allocator.free(private_key);
+    }
+
     const public_key = try readString(allocator, reader);
+    errdefer allocator.free(public_key);
+
     const algo_int = reader.readInt(i32, .little) catch return DeserializeError.UnexpectedEndOfData;
     const algorithm = std.meta.intToEnum(item.PasskeyAlgorithm, algo_int) catch return DeserializeError.InvalidData;
+
     const rp_id = try readString(allocator, reader);
+    errdefer allocator.free(rp_id);
+
     const rp_name = try readOptionalString(allocator, reader);
+    errdefer if (rp_name) |n| allocator.free(n);
+
     const user_handle = try readString(allocator, reader);
+    errdefer allocator.free(user_handle);
+
     const user_name = try readOptionalString(allocator, reader);
+    errdefer if (user_name) |n| allocator.free(n);
+
     const counter = reader.readInt(u32, .little) catch return DeserializeError.UnexpectedEndOfData;
 
     return .{
@@ -424,15 +489,32 @@ fn deserializePasskeyData(allocator: std.mem.Allocator, reader: anytype) !item.P
 
 fn deserializeCardData(allocator: std.mem.Allocator, reader: anytype) !item.CardData {
     const cardholder = try readOptionalString(allocator, reader);
+    errdefer if (cardholder) |c| allocator.free(c);
+
     const number = try readOptionalString(allocator, reader);
+    errdefer if (number) |n| {
+        @memset(@constCast(n), 0);
+        allocator.free(n);
+    };
+
     const brand_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
-    const brand: ?item.CardBrand = if (brand_byte == 0) null else std.meta.intToEnum(item.CardBrand, brand_byte) catch null;
+    const brand: ?item.CardBrand = if (brand_byte == 0) null else std.meta.intToEnum(item.CardBrand, brand_byte) catch return DeserializeError.InvalidData;
     const exp_month_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     const exp_month: ?u8 = if (exp_month_byte == 0) null else exp_month_byte;
     const exp_year_val = reader.readInt(u16, .little) catch return DeserializeError.UnexpectedEndOfData;
     const exp_year: ?u16 = if (exp_year_val == 0) null else exp_year_val;
+
     const cvv = try readOptionalString(allocator, reader);
+    errdefer if (cvv) |c| {
+        @memset(@constCast(c), 0);
+        allocator.free(c);
+    };
+
     const pin = try readOptionalString(allocator, reader);
+    errdefer if (pin) |p| {
+        @memset(@constCast(p), 0);
+        allocator.free(p);
+    };
 
     return .{
         .cardholder_name = cardholder,
@@ -447,29 +529,77 @@ fn deserializeCardData(allocator: std.mem.Allocator, reader: anytype) !item.Card
 
 fn deserializeIdentityData(allocator: std.mem.Allocator, reader: anytype) !item.IdentityData {
     const title = try readOptionalString(allocator, reader);
+    errdefer if (title) |t| allocator.free(t);
+
     const first_name = try readOptionalString(allocator, reader);
+    errdefer if (first_name) |f| allocator.free(f);
+
     const middle_name = try readOptionalString(allocator, reader);
+    errdefer if (middle_name) |m| allocator.free(m);
+
     const last_name = try readOptionalString(allocator, reader);
+    errdefer if (last_name) |l| allocator.free(l);
+
     const email = try readOptionalString(allocator, reader);
+    errdefer if (email) |e| allocator.free(e);
+
     const phone = try readOptionalString(allocator, reader);
+    errdefer if (phone) |p| allocator.free(p);
 
     const has_address = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     var address: ?item.AddressData = null;
     if (has_address == 1) {
+        const street1 = try readOptionalString(allocator, reader);
+        errdefer if (street1) |s| allocator.free(s);
+        const street2 = try readOptionalString(allocator, reader);
+        errdefer if (street2) |s| allocator.free(s);
+        const city = try readOptionalString(allocator, reader);
+        errdefer if (city) |c| allocator.free(c);
+        const state = try readOptionalString(allocator, reader);
+        errdefer if (state) |s| allocator.free(s);
+        const postal_code = try readOptionalString(allocator, reader);
+        errdefer if (postal_code) |p| allocator.free(p);
+        const country = try readOptionalString(allocator, reader);
+        errdefer if (country) |c| allocator.free(c);
         address = .{
-            .street1 = try readOptionalString(allocator, reader),
-            .street2 = try readOptionalString(allocator, reader),
-            .city = try readOptionalString(allocator, reader),
-            .state = try readOptionalString(allocator, reader),
-            .postal_code = try readOptionalString(allocator, reader),
-            .country = try readOptionalString(allocator, reader),
+            .street1 = street1,
+            .street2 = street2,
+            .city = city,
+            .state = state,
+            .postal_code = postal_code,
+            .country = country,
         };
     }
+    errdefer if (address) |a| {
+        if (a.street1) |s| allocator.free(s);
+        if (a.street2) |s| allocator.free(s);
+        if (a.city) |c| allocator.free(c);
+        if (a.state) |s| allocator.free(s);
+        if (a.postal_code) |p| allocator.free(p);
+        if (a.country) |c| allocator.free(c);
+    };
 
     const ssn = try readOptionalString(allocator, reader);
+    errdefer if (ssn) |s| {
+        @memset(@constCast(s), 0);
+        allocator.free(s);
+    };
+
     const passport = try readOptionalString(allocator, reader);
+    errdefer if (passport) |p| {
+        @memset(@constCast(p), 0);
+        allocator.free(p);
+    };
+
     const license_number = try readOptionalString(allocator, reader);
+    errdefer if (license_number) |l| {
+        @memset(@constCast(l), 0);
+        allocator.free(l);
+    };
+
     const company = try readOptionalString(allocator, reader);
+    errdefer if (company) |c| allocator.free(c);
+
     const job_title = try readOptionalString(allocator, reader);
 
     return .{
@@ -490,10 +620,20 @@ fn deserializeIdentityData(allocator: std.mem.Allocator, reader: anytype) !item.
 
 fn deserializeSshKeyData(allocator: std.mem.Allocator, reader: anytype) !item.SshKeyData {
     const private_key = try readString(allocator, reader);
+    errdefer {
+        @memset(@constCast(private_key), 0);
+        allocator.free(private_key);
+    }
+
     const public_key = try readString(allocator, reader);
+    errdefer allocator.free(public_key);
+
     const fingerprint = try readString(allocator, reader);
+    errdefer allocator.free(fingerprint);
+
     const type_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     const key_type = std.meta.intToEnum(item.SshKeyType, type_byte) catch return DeserializeError.InvalidData;
+
     const passphrase = try readOptionalString(allocator, reader);
 
     return .{
@@ -506,24 +646,59 @@ fn deserializeSshKeyData(allocator: std.mem.Allocator, reader: anytype) !item.Ss
 }
 
 fn deserializeApiCredentialData(allocator: std.mem.Allocator, reader: anytype) !item.ApiCredentialData {
+    const api_key = try readOptionalString(allocator, reader);
+    errdefer if (api_key) |k| {
+        @memset(@constCast(k), 0);
+        allocator.free(k);
+    };
+
+    const api_secret = try readOptionalString(allocator, reader);
+    errdefer if (api_secret) |s| {
+        @memset(@constCast(s), 0);
+        allocator.free(s);
+    };
+
+    const endpoint = try readOptionalString(allocator, reader);
+    errdefer if (endpoint) |e| allocator.free(e);
+
+    const documentation_url = try readOptionalString(allocator, reader);
+
     return .{
-        .api_key = try readOptionalString(allocator, reader),
-        .api_secret = try readOptionalString(allocator, reader),
-        .endpoint = try readOptionalString(allocator, reader),
-        .documentation_url = try readOptionalString(allocator, reader),
+        .api_key = api_key,
+        .api_secret = api_secret,
+        .endpoint = endpoint,
+        .documentation_url = documentation_url,
     };
 }
 
 fn deserializeDatabaseData(allocator: std.mem.Allocator, reader: anytype) !item.DatabaseData {
     const type_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     const db_type = std.meta.intToEnum(item.DatabaseType, type_byte) catch return DeserializeError.InvalidData;
+
     const host = try readOptionalString(allocator, reader);
+    errdefer if (host) |h| allocator.free(h);
+
     const port_val = reader.readInt(u16, .little) catch return DeserializeError.UnexpectedEndOfData;
     const port: ?u16 = if (port_val == 0) null else port_val;
+
     const database = try readOptionalString(allocator, reader);
+    errdefer if (database) |d| allocator.free(d);
+
     const username = try readOptionalString(allocator, reader);
+    errdefer if (username) |u| allocator.free(u);
+
     const password = try readOptionalString(allocator, reader);
+    errdefer if (password) |p| {
+        @memset(@constCast(p), 0);
+        allocator.free(p);
+    };
+
     const connection_string = try readOptionalString(allocator, reader);
+    errdefer if (connection_string) |c| {
+        @memset(@constCast(c), 0);
+        allocator.free(c);
+    };
+
     const sid = try readOptionalString(allocator, reader);
 
     return .{
@@ -540,7 +715,14 @@ fn deserializeDatabaseData(allocator: std.mem.Allocator, reader: anytype) !item.
 
 fn deserializeWifiData(allocator: std.mem.Allocator, reader: anytype) !item.WifiData {
     const ssid = try readString(allocator, reader);
+    errdefer allocator.free(ssid);
+
     const password = try readOptionalString(allocator, reader);
+    errdefer if (password) |p| {
+        @memset(@constCast(p), 0);
+        allocator.free(p);
+    };
+
     const sec_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     const security = std.meta.intToEnum(item.WifiSecurity, sec_byte) catch return DeserializeError.InvalidData;
     const hidden_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
@@ -554,14 +736,35 @@ fn deserializeWifiData(allocator: std.mem.Allocator, reader: anytype) !item.Wifi
 }
 
 fn deserializeLicenseData(allocator: std.mem.Allocator, reader: anytype) !item.LicenseData {
+    const license_key = try readOptionalString(allocator, reader);
+    errdefer if (license_key) |k| {
+        @memset(@constCast(k), 0);
+        allocator.free(k);
+    };
+
+    const product_name = try readOptionalString(allocator, reader);
+    errdefer if (product_name) |p| allocator.free(p);
+
+    const version = try readOptionalString(allocator, reader);
+    errdefer if (version) |v| allocator.free(v);
+
+    const publisher = try readOptionalString(allocator, reader);
+    errdefer if (publisher) |p| allocator.free(p);
+
+    const email = try readOptionalString(allocator, reader);
+    errdefer if (email) |e| allocator.free(e);
+
+    const purchase_date = try readOptionalI64(reader);
+    const expiration_date = try readOptionalI64(reader);
+
     return .{
-        .license_key = try readOptionalString(allocator, reader),
-        .product_name = try readOptionalString(allocator, reader),
-        .version = try readOptionalString(allocator, reader),
-        .publisher = try readOptionalString(allocator, reader),
-        .email = try readOptionalString(allocator, reader),
-        .purchase_date = try readOptionalI64(reader),
-        .expiration_date = try readOptionalI64(reader),
+        .license_key = license_key,
+        .product_name = product_name,
+        .version = version,
+        .publisher = publisher,
+        .email = email,
+        .purchase_date = purchase_date,
+        .expiration_date = expiration_date,
     };
 }
 
