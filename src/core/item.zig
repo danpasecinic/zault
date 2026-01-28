@@ -248,8 +248,72 @@ pub const CardData = struct {
     }
 };
 
+pub const AddressData = struct {
+    street1: ?[]const u8 = null,
+    street2: ?[]const u8 = null,
+    city: ?[]const u8 = null,
+    state: ?[]const u8 = null,
+    postal_code: ?[]const u8 = null,
+    country: ?[]const u8 = null,
+
+    pub fn deinit(self: *AddressData, allocator: std.mem.Allocator) void {
+        if (self.street1) |s| allocator.free(s);
+        if (self.street2) |s| allocator.free(s);
+        if (self.city) |c| allocator.free(c);
+        if (self.state) |s| allocator.free(s);
+        if (self.postal_code) |p| allocator.free(p);
+        if (self.country) |c| allocator.free(c);
+    }
+};
+
 pub const IdentityData = struct {
-    pub fn deinit(_: *IdentityData, _: std.mem.Allocator) void {}
+    title: ?[]const u8 = null,
+    first_name: ?[]const u8 = null,
+    middle_name: ?[]const u8 = null,
+    last_name: ?[]const u8 = null,
+    email: ?[]const u8 = null,
+    phone: ?[]const u8 = null,
+    address: ?AddressData = null,
+    ssn: ?[]const u8 = null,
+    passport: ?[]const u8 = null,
+    license_number: ?[]const u8 = null,
+    company: ?[]const u8 = null,
+    job_title: ?[]const u8 = null,
+
+    pub fn deinit(self: *IdentityData, allocator: std.mem.Allocator) void {
+        if (self.title) |t| allocator.free(t);
+        if (self.first_name) |n| allocator.free(n);
+        if (self.middle_name) |n| allocator.free(n);
+        if (self.last_name) |n| allocator.free(n);
+        if (self.email) |e| allocator.free(e);
+        if (self.phone) |p| allocator.free(p);
+        if (self.address) |*a| {
+            var addr = a.*;
+            addr.deinit(allocator);
+        }
+        if (self.ssn) |s| {
+            @memset(@constCast(s), 0);
+            allocator.free(s);
+        }
+        if (self.passport) |p| {
+            @memset(@constCast(p), 0);
+            allocator.free(p);
+        }
+        if (self.license_number) |l| allocator.free(l);
+        if (self.company) |c| allocator.free(c);
+        if (self.job_title) |j| allocator.free(j);
+    }
+
+    pub fn fullName(self: *const IdentityData, allocator: std.mem.Allocator) ![]const u8 {
+        var parts: std.ArrayList([]const u8) = .empty;
+        defer parts.deinit(allocator);
+
+        if (self.first_name) |n| try parts.append(allocator, n);
+        if (self.middle_name) |n| try parts.append(allocator, n);
+        if (self.last_name) |n| try parts.append(allocator, n);
+
+        return std.mem.join(allocator, " ", parts.items);
+    }
 };
 
 pub const SshKeyData = struct {
@@ -307,4 +371,16 @@ test "card data deinit clears sensitive fields" {
     };
 
     card.deinit(allocator);
+}
+
+test "identity data full name" {
+    const identity = IdentityData{
+        .first_name = "John",
+        .middle_name = "Q",
+        .last_name = "Public",
+    };
+
+    const full = try identity.fullName(std.testing.allocator);
+    defer std.testing.allocator.free(full);
+    try std.testing.expectEqualStrings("John Q Public", full);
 }
