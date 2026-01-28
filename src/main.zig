@@ -6,7 +6,6 @@ const cli = @import("cli/root.zig");
 const commands = @import("cli/commands/root.zig");
 const core = @import("core/vault.zig");
 const config = @import("core/config.zig");
-const entry = @import("core/entry.zig");
 const memory = @import("memory/secure_allocator.zig");
 const argon2 = @import("crypto/argon2.zig");
 const xchacha = @import("crypto/xchacha.zig");
@@ -124,11 +123,13 @@ test {
     _ = cli;
     _ = core;
     _ = config;
-    _ = entry;
     _ = memory;
     _ = argon2;
     _ = xchacha;
     _ = totp;
     _ = generator;
     _ = clipboard;
+    _ = @import("core/item.zig");
+    _ = @import("core/uuid.zig");
+    _ = @import("core/serializer.zig");
 }
