@@ -316,24 +316,132 @@ pub const IdentityData = struct {
     }
 };
 
+pub const SshKeyType = enum(u8) {
+    ed25519 = 1,
+    rsa = 2,
+    ecdsa = 3,
+    dsa = 4,
+};
+
 pub const SshKeyData = struct {
-    pub fn deinit(_: *SshKeyData, _: std.mem.Allocator) void {}
+    private_key: []const u8,
+    public_key: []const u8,
+    fingerprint: []const u8,
+    key_type: SshKeyType,
+    passphrase: ?[]const u8 = null,
+
+    pub fn deinit(self: *SshKeyData, allocator: std.mem.Allocator) void {
+        @memset(@constCast(self.private_key), 0);
+        allocator.free(self.private_key);
+        allocator.free(self.public_key);
+        allocator.free(self.fingerprint);
+        if (self.passphrase) |p| {
+            @memset(@constCast(p), 0);
+            allocator.free(p);
+        }
+    }
 };
 
 pub const ApiCredentialData = struct {
-    pub fn deinit(_: *ApiCredentialData, _: std.mem.Allocator) void {}
+    api_key: ?[]const u8 = null,
+    api_secret: ?[]const u8 = null,
+    endpoint: ?[]const u8 = null,
+    documentation_url: ?[]const u8 = null,
+
+    pub fn deinit(self: *ApiCredentialData, allocator: std.mem.Allocator) void {
+        if (self.api_key) |k| {
+            @memset(@constCast(k), 0);
+            allocator.free(k);
+        }
+        if (self.api_secret) |s| {
+            @memset(@constCast(s), 0);
+            allocator.free(s);
+        }
+        if (self.endpoint) |e| allocator.free(e);
+        if (self.documentation_url) |d| allocator.free(d);
+    }
+};
+
+pub const DatabaseType = enum(u8) {
+    postgresql = 1,
+    mysql = 2,
+    mariadb = 3,
+    sqlite = 4,
+    mongodb = 5,
+    redis = 6,
+    oracle = 7,
+    sqlserver = 8,
+    other = 255,
 };
 
 pub const DatabaseData = struct {
-    pub fn deinit(_: *DatabaseData, _: std.mem.Allocator) void {}
+    db_type: DatabaseType = .postgresql,
+    host: ?[]const u8 = null,
+    port: ?u16 = null,
+    database: ?[]const u8 = null,
+    username: ?[]const u8 = null,
+    password: ?[]const u8 = null,
+    connection_string: ?[]const u8 = null,
+    sid: ?[]const u8 = null,
+
+    pub fn deinit(self: *DatabaseData, allocator: std.mem.Allocator) void {
+        if (self.host) |h| allocator.free(h);
+        if (self.database) |d| allocator.free(d);
+        if (self.username) |u| allocator.free(u);
+        if (self.password) |p| {
+            @memset(@constCast(p), 0);
+            allocator.free(p);
+        }
+        if (self.connection_string) |c| {
+            @memset(@constCast(c), 0);
+            allocator.free(c);
+        }
+        if (self.sid) |s| allocator.free(s);
+    }
+};
+
+pub const WifiSecurity = enum(u8) {
+    none = 0,
+    wep = 1,
+    wpa = 2,
+    wpa2 = 3,
+    wpa3 = 4,
 };
 
 pub const WifiData = struct {
-    pub fn deinit(_: *WifiData, _: std.mem.Allocator) void {}
+    ssid: []const u8,
+    password: ?[]const u8 = null,
+    security: WifiSecurity = .wpa2,
+    hidden: bool = false,
+
+    pub fn deinit(self: *WifiData, allocator: std.mem.Allocator) void {
+        allocator.free(self.ssid);
+        if (self.password) |p| {
+            @memset(@constCast(p), 0);
+            allocator.free(p);
+        }
+    }
 };
 
 pub const LicenseData = struct {
-    pub fn deinit(_: *LicenseData, _: std.mem.Allocator) void {}
+    license_key: ?[]const u8 = null,
+    product_name: ?[]const u8 = null,
+    version: ?[]const u8 = null,
+    publisher: ?[]const u8 = null,
+    email: ?[]const u8 = null,
+    purchase_date: ?i64 = null,
+    expiration_date: ?i64 = null,
+
+    pub fn deinit(self: *LicenseData, allocator: std.mem.Allocator) void {
+        if (self.license_key) |k| {
+            @memset(@constCast(k), 0);
+            allocator.free(k);
+        }
+        if (self.product_name) |p| allocator.free(p);
+        if (self.version) |v| allocator.free(v);
+        if (self.publisher) |p| allocator.free(p);
+        if (self.email) |e| allocator.free(e);
+    }
 };
 
 test "item type enum values" {
@@ -383,4 +491,30 @@ test "identity data full name" {
     const full = try identity.fullName(std.testing.allocator);
     defer std.testing.allocator.free(full);
     try std.testing.expectEqualStrings("John Q Public", full);
+}
+
+test "ssh key data deinit clears private key" {
+    const allocator = std.testing.allocator;
+
+    var ssh = SshKeyData{
+        .private_key = try allocator.dupe(u8, "PRIVATE"),
+        .public_key = try allocator.dupe(u8, "PUBLIC"),
+        .fingerprint = try allocator.dupe(u8, "SHA256:xxx"),
+        .key_type = .ed25519,
+        .passphrase = try allocator.dupe(u8, "secret"),
+    };
+
+    ssh.deinit(allocator);
+}
+
+test "wifi data deinit" {
+    const allocator = std.testing.allocator;
+
+    var wifi = WifiData{
+        .ssid = try allocator.dupe(u8, "MyNetwork"),
+        .password = try allocator.dupe(u8, "wifipass"),
+        .security = .wpa3,
+    };
+
+    wifi.deinit(allocator);
 }
