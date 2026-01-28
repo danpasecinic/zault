@@ -109,10 +109,77 @@ pub const ItemData = union(ItemType) {
     }
 };
 
-// Placeholder structs - will be filled in next tasks
+pub const TotpAlgorithm = enum(u8) {
+    sha1 = 1,
+    sha256 = 2,
+    sha512 = 3,
+};
+
+pub const TotpData = struct {
+    secret: []const u8,
+    algorithm: TotpAlgorithm = .sha1,
+    digits: u8 = 6,
+    period: u32 = 30,
+
+    pub fn deinit(self: *TotpData, allocator: std.mem.Allocator) void {
+        @memset(@constCast(self.secret), 0);
+        allocator.free(self.secret);
+    }
+};
+
+pub const UriMatchType = enum(u8) {
+    domain = 0,
+    host = 1,
+    starts_with = 2,
+    exact = 3,
+    regex = 4,
+    never = 5,
+};
+
+pub const Uri = struct {
+    uri: []const u8,
+    match_type: UriMatchType = .domain,
+
+    pub fn deinit(self: *Uri, allocator: std.mem.Allocator) void {
+        allocator.free(self.uri);
+    }
+};
+
+pub const PasskeyAlgorithm = enum(i32) {
+    es256 = -7,
+    ed25519 = -8,
+    rs256 = -257,
+};
+
+pub const PasskeyData = struct {
+    credential_id: []const u8,
+    private_key: []const u8,
+    public_key: []const u8,
+    algorithm: PasskeyAlgorithm,
+    rp_id: []const u8,
+    rp_name: ?[]const u8,
+    user_handle: []const u8,
+    user_name: ?[]const u8,
+    counter: u32,
+
+    pub fn deinit(self: *PasskeyData, allocator: std.mem.Allocator) void {
+        allocator.free(self.credential_id);
+        @memset(@constCast(self.private_key), 0);
+        allocator.free(self.private_key);
+        allocator.free(self.public_key);
+        allocator.free(self.rp_id);
+        if (self.rp_name) |n| allocator.free(n);
+        allocator.free(self.user_handle);
+        if (self.user_name) |n| allocator.free(n);
+    }
+};
+
 pub const LoginData = struct {
     username: ?[]const u8 = null,
     password: ?[]const u8 = null,
+    uris: []Uri = &.{},
+    totp: ?TotpData = null,
+    passkeys: []PasskeyData = &.{},
 
     pub fn deinit(self: *LoginData, allocator: std.mem.Allocator) void {
         if (self.username) |u| allocator.free(u);
@@ -120,6 +187,18 @@ pub const LoginData = struct {
             @memset(@constCast(p), 0);
             allocator.free(p);
         }
+        for (self.uris) |*uri| uri.deinit(allocator);
+        if (self.uris.len > 0) allocator.free(self.uris);
+        if (self.totp) |*t| {
+            var totp = t.*;
+            totp.deinit(allocator);
+        }
+        for (self.passkeys) |*pk| pk.deinit(allocator);
+        if (self.passkeys.len > 0) allocator.free(self.passkeys);
+    }
+
+    pub fn hasTotp(self: *const LoginData) bool {
+        return self.totp != null;
     }
 };
 
@@ -161,4 +240,18 @@ test "item type enum values" {
 test "field type enum values" {
     try std.testing.expectEqual(@as(u8, 0), @intFromEnum(FieldType.text));
     try std.testing.expectEqual(@as(u8, 1), @intFromEnum(FieldType.hidden));
+}
+
+test "login data deinit clears password" {
+    const allocator = std.testing.allocator;
+
+    var login = LoginData{
+        .username = try allocator.dupe(u8, "user"),
+        .password = try allocator.dupe(u8, "secret"),
+        .uris = &.{},
+        .totp = null,
+        .passkeys = &.{},
+    };
+
+    login.deinit(allocator);
 }
