@@ -224,7 +224,7 @@ fn runList(allocator: std.mem.Allocator) !void {
     defer ctx.deinit();
 
     var count: usize = 0;
-    for (ctx.vault.items.items) |i| {
+    for (ctx.vault.item_list.items) |i| {
         if (i.item_type == .login and i.data.login.totp != null) {
             count += 1;
         }
@@ -239,7 +239,7 @@ fn runList(allocator: std.mem.Allocator) !void {
     std.debug.print("{s:<30} {s}\n", .{ "NAME", "USERNAME" });
     std.debug.print("{s}\n", .{"-" ** 45});
 
-    for (ctx.vault.items.items) |i| {
+    for (ctx.vault.item_list.items) |i| {
         if (i.item_type == .login and i.data.login.totp != null) {
             const username = i.data.login.username orelse "";
             std.debug.print("{s:<30} {s}\n", .{ i.name, username });

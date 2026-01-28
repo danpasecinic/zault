@@ -6,16 +6,16 @@ pub fn run(allocator: std.mem.Allocator, _: []const []const u8, _: config.Config
     var ctx = vault_helpers.openAndUnlock(allocator) catch return;
     defer ctx.deinit();
 
-    if (ctx.vault.items.items.len == 0) {
+    if (ctx.vault.item_list.items.len == 0) {
         std.debug.print("Vault is empty. Use 'zault add <name>' to add items.\n", .{});
         return;
     }
 
-    std.debug.print("Items ({d}):\n", .{ctx.vault.items.items.len});
+    std.debug.print("Items ({d}):\n", .{ctx.vault.item_list.items.len});
     std.debug.print("{s:<30} {s:<12} {s}\n", .{ "NAME", "TYPE", "USERNAME/INFO" });
     std.debug.print("{s}\n", .{"-" ** 60});
 
-    for (ctx.vault.items.items) |i| {
+    for (ctx.vault.item_list.items) |i| {
         const type_str = switch (i.item_type) {
             .login => "login",
             .secure_note => "note",
