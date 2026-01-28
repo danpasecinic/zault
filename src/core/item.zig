@@ -444,6 +444,134 @@ pub const LicenseData = struct {
     }
 };
 
+pub fn createLoginItem(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    username: ?[]const u8,
+    password: ?[]const u8,
+    url: ?[]const u8,
+) !Item {
+    const now = std.time.timestamp();
+
+    const name_copy = try allocator.dupe(u8, name);
+    errdefer allocator.free(name_copy);
+
+    const username_copy = if (username) |u| try allocator.dupe(u8, u) else null;
+    errdefer if (username_copy) |u| allocator.free(u);
+
+    const password_copy = if (password) |p| try allocator.dupe(u8, p) else null;
+    errdefer if (password_copy) |p| allocator.free(p);
+
+    var uris: []Uri = &.{};
+    if (url) |u| {
+        const uri_copy = try allocator.dupe(u8, u);
+        errdefer allocator.free(uri_copy);
+
+        uris = try allocator.alloc(Uri, 1);
+        uris[0] = .{ .uri = uri_copy };
+    }
+
+    return Item{
+        .id = Uuid.generate(),
+        .name = name_copy,
+        .notes = null,
+        .item_type = .login,
+        .data = .{
+            .login = .{
+                .username = username_copy,
+                .password = password_copy,
+                .uris = uris,
+            },
+        },
+        .favorite = false,
+        .fields = &.{},
+        .password_history = &.{},
+        .created_at = now,
+        .modified_at = now,
+        .last_accessed_at = null,
+        .access_count = 0,
+        .deleted_at = null,
+    };
+}
+
+pub fn createSecureNoteItem(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    notes: []const u8,
+) !Item {
+    const now = std.time.timestamp();
+
+    const name_copy = try allocator.dupe(u8, name);
+    errdefer allocator.free(name_copy);
+
+    const notes_copy = try allocator.dupe(u8, notes);
+    errdefer allocator.free(notes_copy);
+
+    return Item{
+        .id = Uuid.generate(),
+        .name = name_copy,
+        .notes = notes_copy,
+        .item_type = .secure_note,
+        .data = .{ .secure_note = .{} },
+        .favorite = false,
+        .fields = &.{},
+        .password_history = &.{},
+        .created_at = now,
+        .modified_at = now,
+        .last_accessed_at = null,
+        .access_count = 0,
+        .deleted_at = null,
+    };
+}
+
+pub fn createCardItem(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    cardholder: ?[]const u8,
+    number: ?[]const u8,
+    exp_month: ?u8,
+    exp_year: ?u16,
+    cvv: ?[]const u8,
+) !Item {
+    const now = std.time.timestamp();
+
+    const name_copy = try allocator.dupe(u8, name);
+    errdefer allocator.free(name_copy);
+
+    const cardholder_copy = if (cardholder) |c| try allocator.dupe(u8, c) else null;
+    errdefer if (cardholder_copy) |c| allocator.free(c);
+
+    const number_copy = if (number) |n| try allocator.dupe(u8, n) else null;
+    errdefer if (number_copy) |n| allocator.free(n);
+
+    const cvv_copy = if (cvv) |c| try allocator.dupe(u8, c) else null;
+    errdefer if (cvv_copy) |c| allocator.free(c);
+
+    return Item{
+        .id = Uuid.generate(),
+        .name = name_copy,
+        .notes = null,
+        .item_type = .card,
+        .data = .{
+            .card = .{
+                .cardholder_name = cardholder_copy,
+                .number = number_copy,
+                .exp_month = exp_month,
+                .exp_year = exp_year,
+                .cvv = cvv_copy,
+            },
+        },
+        .favorite = false,
+        .fields = &.{},
+        .password_history = &.{},
+        .created_at = now,
+        .modified_at = now,
+        .last_accessed_at = null,
+        .access_count = 0,
+        .deleted_at = null,
+    };
+}
+
 test "item type enum values" {
     try std.testing.expectEqual(@as(u8, 1), @intFromEnum(ItemType.login));
     try std.testing.expectEqual(@as(u8, 9), @intFromEnum(ItemType.license));
@@ -517,4 +645,15 @@ test "wifi data deinit" {
     };
 
     wifi.deinit(allocator);
+}
+
+test "create login item" {
+    const allocator = std.testing.allocator;
+
+    var item = try createLoginItem(allocator, "github.com", "user", "pass", "https://github.com");
+    defer item.deinit(allocator);
+
+    try std.testing.expectEqualStrings("github.com", item.name);
+    try std.testing.expectEqual(ItemType.login, item.item_type);
+    try std.testing.expectEqualStrings("user", item.data.login.username.?);
 }
