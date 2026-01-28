@@ -1,6 +1,7 @@
 const std = @import("std");
 const item = @import("item.zig");
 const Uuid = @import("uuid.zig").Uuid;
+const memory = @import("../memory/secure_allocator.zig");
 
 pub const SerializeError = error{
     BufferTooSmall,
@@ -307,10 +308,7 @@ fn deserializeItem(allocator: std.mem.Allocator, reader: anytype) !item.Item {
 
     for (0..history_count) |i| {
         const pw = try readString(allocator, reader);
-        errdefer {
-            @memset(@constCast(pw), 0);
-            allocator.free(pw);
-        }
+        errdefer memory.secureZeroAndFree(allocator, pw);
         const changed_at = reader.readInt(i64, .little) catch return DeserializeError.UnexpectedEndOfData;
         history[i] = .{ .password = pw, .changed_at = changed_at };
         history_initialized = i + 1;
@@ -368,13 +366,10 @@ fn deserializeItemData(allocator: std.mem.Allocator, reader: anytype, item_type:
 
 fn deserializeLoginData(allocator: std.mem.Allocator, reader: anytype) !item.LoginData {
     const username = try readOptionalString(allocator, reader);
-    errdefer if (username) |u| allocator.free(u);
+    errdefer memory.freeOptional(allocator, username);
 
     const password = try readOptionalString(allocator, reader);
-    errdefer if (password) |p| {
-        @memset(@constCast(p), 0);
-        allocator.free(p);
-    };
+    errdefer memory.secureFree(allocator, password);
 
     const uri_count = reader.readInt(u32, .little) catch return DeserializeError.UnexpectedEndOfData;
     var uris = try allocator.alloc(item.Uri, uri_count);
@@ -399,10 +394,7 @@ fn deserializeLoginData(allocator: std.mem.Allocator, reader: anytype) !item.Log
     var totp: ?item.TotpData = null;
     if (has_totp == 1) {
         const secret = try readString(allocator, reader);
-        errdefer {
-            @memset(@constCast(secret), 0);
-            allocator.free(secret);
-        }
+        errdefer memory.secureZeroAndFree(allocator, secret);
         const algo_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
         const algorithm = std.meta.intToEnum(item.TotpAlgorithm, algo_byte) catch return DeserializeError.InvalidData;
         const digits = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
@@ -449,10 +441,7 @@ fn deserializePasskeyData(allocator: std.mem.Allocator, reader: anytype) !item.P
     errdefer allocator.free(credential_id);
 
     const private_key = try readString(allocator, reader);
-    errdefer {
-        @memset(@constCast(private_key), 0);
-        allocator.free(private_key);
-    }
+    errdefer memory.secureZeroAndFree(allocator, private_key);
 
     const public_key = try readString(allocator, reader);
     errdefer allocator.free(public_key);
@@ -464,13 +453,13 @@ fn deserializePasskeyData(allocator: std.mem.Allocator, reader: anytype) !item.P
     errdefer allocator.free(rp_id);
 
     const rp_name = try readOptionalString(allocator, reader);
-    errdefer if (rp_name) |n| allocator.free(n);
+    errdefer memory.freeOptional(allocator, rp_name);
 
     const user_handle = try readString(allocator, reader);
     errdefer allocator.free(user_handle);
 
     const user_name = try readOptionalString(allocator, reader);
-    errdefer if (user_name) |n| allocator.free(n);
+    errdefer memory.freeOptional(allocator, user_name);
 
     const counter = reader.readInt(u32, .little) catch return DeserializeError.UnexpectedEndOfData;
 
@@ -489,13 +478,10 @@ fn deserializePasskeyData(allocator: std.mem.Allocator, reader: anytype) !item.P
 
 fn deserializeCardData(allocator: std.mem.Allocator, reader: anytype) !item.CardData {
     const cardholder = try readOptionalString(allocator, reader);
-    errdefer if (cardholder) |c| allocator.free(c);
+    errdefer memory.freeOptional(allocator, cardholder);
 
     const number = try readOptionalString(allocator, reader);
-    errdefer if (number) |n| {
-        @memset(@constCast(n), 0);
-        allocator.free(n);
-    };
+    errdefer memory.secureFree(allocator, number);
 
     const brand_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     const brand: ?item.CardBrand = if (brand_byte == 0) null else std.meta.intToEnum(item.CardBrand, brand_byte) catch return DeserializeError.InvalidData;
@@ -505,16 +491,10 @@ fn deserializeCardData(allocator: std.mem.Allocator, reader: anytype) !item.Card
     const exp_year: ?u16 = if (exp_year_val == 0) null else exp_year_val;
 
     const cvv = try readOptionalString(allocator, reader);
-    errdefer if (cvv) |c| {
-        @memset(@constCast(c), 0);
-        allocator.free(c);
-    };
+    errdefer memory.secureFree(allocator, cvv);
 
     const pin = try readOptionalString(allocator, reader);
-    errdefer if (pin) |p| {
-        @memset(@constCast(p), 0);
-        allocator.free(p);
-    };
+    errdefer memory.secureFree(allocator, pin);
 
     return .{
         .cardholder_name = cardholder,
@@ -529,38 +509,38 @@ fn deserializeCardData(allocator: std.mem.Allocator, reader: anytype) !item.Card
 
 fn deserializeIdentityData(allocator: std.mem.Allocator, reader: anytype) !item.IdentityData {
     const title = try readOptionalString(allocator, reader);
-    errdefer if (title) |t| allocator.free(t);
+    errdefer memory.freeOptional(allocator, title);
 
     const first_name = try readOptionalString(allocator, reader);
-    errdefer if (first_name) |f| allocator.free(f);
+    errdefer memory.freeOptional(allocator, first_name);
 
     const middle_name = try readOptionalString(allocator, reader);
-    errdefer if (middle_name) |m| allocator.free(m);
+    errdefer memory.freeOptional(allocator, middle_name);
 
     const last_name = try readOptionalString(allocator, reader);
-    errdefer if (last_name) |l| allocator.free(l);
+    errdefer memory.freeOptional(allocator, last_name);
 
     const email = try readOptionalString(allocator, reader);
-    errdefer if (email) |e| allocator.free(e);
+    errdefer memory.freeOptional(allocator, email);
 
     const phone = try readOptionalString(allocator, reader);
-    errdefer if (phone) |p| allocator.free(p);
+    errdefer memory.freeOptional(allocator, phone);
 
     const has_address = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     var address: ?item.AddressData = null;
     if (has_address == 1) {
         const street1 = try readOptionalString(allocator, reader);
-        errdefer if (street1) |s| allocator.free(s);
+        errdefer memory.freeOptional(allocator, street1);
         const street2 = try readOptionalString(allocator, reader);
-        errdefer if (street2) |s| allocator.free(s);
+        errdefer memory.freeOptional(allocator, street2);
         const city = try readOptionalString(allocator, reader);
-        errdefer if (city) |c| allocator.free(c);
+        errdefer memory.freeOptional(allocator, city);
         const state = try readOptionalString(allocator, reader);
-        errdefer if (state) |s| allocator.free(s);
+        errdefer memory.freeOptional(allocator, state);
         const postal_code = try readOptionalString(allocator, reader);
-        errdefer if (postal_code) |p| allocator.free(p);
+        errdefer memory.freeOptional(allocator, postal_code);
         const country = try readOptionalString(allocator, reader);
-        errdefer if (country) |c| allocator.free(c);
+        errdefer memory.freeOptional(allocator, country);
         address = .{
             .street1 = street1,
             .street2 = street2,
@@ -571,34 +551,25 @@ fn deserializeIdentityData(allocator: std.mem.Allocator, reader: anytype) !item.
         };
     }
     errdefer if (address) |a| {
-        if (a.street1) |s| allocator.free(s);
-        if (a.street2) |s| allocator.free(s);
-        if (a.city) |c| allocator.free(c);
-        if (a.state) |s| allocator.free(s);
-        if (a.postal_code) |p| allocator.free(p);
-        if (a.country) |c| allocator.free(c);
+        memory.freeOptional(allocator, a.street1);
+        memory.freeOptional(allocator, a.street2);
+        memory.freeOptional(allocator, a.city);
+        memory.freeOptional(allocator, a.state);
+        memory.freeOptional(allocator, a.postal_code);
+        memory.freeOptional(allocator, a.country);
     };
 
     const ssn = try readOptionalString(allocator, reader);
-    errdefer if (ssn) |s| {
-        @memset(@constCast(s), 0);
-        allocator.free(s);
-    };
+    errdefer memory.secureFree(allocator, ssn);
 
     const passport = try readOptionalString(allocator, reader);
-    errdefer if (passport) |p| {
-        @memset(@constCast(p), 0);
-        allocator.free(p);
-    };
+    errdefer memory.secureFree(allocator, passport);
 
     const license_number = try readOptionalString(allocator, reader);
-    errdefer if (license_number) |l| {
-        @memset(@constCast(l), 0);
-        allocator.free(l);
-    };
+    errdefer memory.freeOptional(allocator, license_number);
 
     const company = try readOptionalString(allocator, reader);
-    errdefer if (company) |c| allocator.free(c);
+    errdefer memory.freeOptional(allocator, company);
 
     const job_title = try readOptionalString(allocator, reader);
 
@@ -620,10 +591,7 @@ fn deserializeIdentityData(allocator: std.mem.Allocator, reader: anytype) !item.
 
 fn deserializeSshKeyData(allocator: std.mem.Allocator, reader: anytype) !item.SshKeyData {
     const private_key = try readString(allocator, reader);
-    errdefer {
-        @memset(@constCast(private_key), 0);
-        allocator.free(private_key);
-    }
+    errdefer memory.secureZeroAndFree(allocator, private_key);
 
     const public_key = try readString(allocator, reader);
     errdefer allocator.free(public_key);
@@ -647,19 +615,13 @@ fn deserializeSshKeyData(allocator: std.mem.Allocator, reader: anytype) !item.Ss
 
 fn deserializeApiCredentialData(allocator: std.mem.Allocator, reader: anytype) !item.ApiCredentialData {
     const api_key = try readOptionalString(allocator, reader);
-    errdefer if (api_key) |k| {
-        @memset(@constCast(k), 0);
-        allocator.free(k);
-    };
+    errdefer memory.secureFree(allocator, api_key);
 
     const api_secret = try readOptionalString(allocator, reader);
-    errdefer if (api_secret) |s| {
-        @memset(@constCast(s), 0);
-        allocator.free(s);
-    };
+    errdefer memory.secureFree(allocator, api_secret);
 
     const endpoint = try readOptionalString(allocator, reader);
-    errdefer if (endpoint) |e| allocator.free(e);
+    errdefer memory.freeOptional(allocator, endpoint);
 
     const documentation_url = try readOptionalString(allocator, reader);
 
@@ -676,28 +638,22 @@ fn deserializeDatabaseData(allocator: std.mem.Allocator, reader: anytype) !item.
     const db_type = std.meta.intToEnum(item.DatabaseType, type_byte) catch return DeserializeError.InvalidData;
 
     const host = try readOptionalString(allocator, reader);
-    errdefer if (host) |h| allocator.free(h);
+    errdefer memory.freeOptional(allocator, host);
 
     const port_val = reader.readInt(u16, .little) catch return DeserializeError.UnexpectedEndOfData;
     const port: ?u16 = if (port_val == 0) null else port_val;
 
     const database = try readOptionalString(allocator, reader);
-    errdefer if (database) |d| allocator.free(d);
+    errdefer memory.freeOptional(allocator, database);
 
     const username = try readOptionalString(allocator, reader);
-    errdefer if (username) |u| allocator.free(u);
+    errdefer memory.freeOptional(allocator, username);
 
     const password = try readOptionalString(allocator, reader);
-    errdefer if (password) |p| {
-        @memset(@constCast(p), 0);
-        allocator.free(p);
-    };
+    errdefer memory.secureFree(allocator, password);
 
     const connection_string = try readOptionalString(allocator, reader);
-    errdefer if (connection_string) |c| {
-        @memset(@constCast(c), 0);
-        allocator.free(c);
-    };
+    errdefer memory.secureFree(allocator, connection_string);
 
     const sid = try readOptionalString(allocator, reader);
 
@@ -718,10 +674,7 @@ fn deserializeWifiData(allocator: std.mem.Allocator, reader: anytype) !item.Wifi
     errdefer allocator.free(ssid);
 
     const password = try readOptionalString(allocator, reader);
-    errdefer if (password) |p| {
-        @memset(@constCast(p), 0);
-        allocator.free(p);
-    };
+    errdefer memory.secureFree(allocator, password);
 
     const sec_byte = reader.readByte() catch return DeserializeError.UnexpectedEndOfData;
     const security = std.meta.intToEnum(item.WifiSecurity, sec_byte) catch return DeserializeError.InvalidData;
@@ -737,22 +690,19 @@ fn deserializeWifiData(allocator: std.mem.Allocator, reader: anytype) !item.Wifi
 
 fn deserializeLicenseData(allocator: std.mem.Allocator, reader: anytype) !item.LicenseData {
     const license_key = try readOptionalString(allocator, reader);
-    errdefer if (license_key) |k| {
-        @memset(@constCast(k), 0);
-        allocator.free(k);
-    };
+    errdefer memory.secureFree(allocator, license_key);
 
     const product_name = try readOptionalString(allocator, reader);
-    errdefer if (product_name) |p| allocator.free(p);
+    errdefer memory.freeOptional(allocator, product_name);
 
     const version = try readOptionalString(allocator, reader);
-    errdefer if (version) |v| allocator.free(v);
+    errdefer memory.freeOptional(allocator, version);
 
     const publisher = try readOptionalString(allocator, reader);
-    errdefer if (publisher) |p| allocator.free(p);
+    errdefer memory.freeOptional(allocator, publisher);
 
     const email = try readOptionalString(allocator, reader);
-    errdefer if (email) |e| allocator.free(e);
+    errdefer memory.freeOptional(allocator, email);
 
     const purchase_date = try readOptionalI64(reader);
     const expiration_date = try readOptionalI64(reader);

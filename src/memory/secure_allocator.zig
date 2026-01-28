@@ -75,6 +75,22 @@ pub fn secureZero(buf: []u8) void {
     std.crypto.secureZero(u8, volatile_buf);
 }
 
+// Zero sensitive data then free (non-optional) - use for passwords, keys, etc.
+pub fn secureZeroAndFree(allocator: std.mem.Allocator, data: []const u8) void {
+    secureZero(@constCast(data));
+    allocator.free(data);
+}
+
+// Zero sensitive data then free (optional) - use for passwords, keys, etc.
+pub fn secureFree(allocator: std.mem.Allocator, data: ?[]const u8) void {
+    if (data) |d| secureZeroAndFree(allocator, d);
+}
+
+// Free optional non-sensitive data
+pub fn freeOptional(allocator: std.mem.Allocator, data: ?[]const u8) void {
+    if (data) |d| allocator.free(d);
+}
+
 fn lockMemory(ptr: [*]u8, len: usize) !void {
     if (builtin.os.tag == .linux or builtin.os.tag == .macos) {
         const result = std.c.mlock(ptr, len);

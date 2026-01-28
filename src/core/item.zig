@@ -1,5 +1,6 @@
 const std = @import("std");
 const Uuid = @import("uuid.zig").Uuid;
+const memory = @import("../memory/secure_allocator.zig");
 
 pub const ItemType = enum(u8) {
     login = 1,
@@ -33,7 +34,7 @@ pub const CustomField = struct {
 
     pub fn deinit(self: *CustomField, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
-        if (self.value) |v| allocator.free(v);
+        memory.freeOptional(allocator, self.value);
     }
 };
 
@@ -42,8 +43,7 @@ pub const PasswordHistoryEntry = struct {
     changed_at: i64,
 
     pub fn deinit(self: *PasswordHistoryEntry, allocator: std.mem.Allocator) void {
-        @memset(@constCast(self.password), 0);
-        allocator.free(self.password);
+        memory.secureFree(allocator, self.password);
     }
 };
 
@@ -66,7 +66,7 @@ pub const Item = struct {
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
-        if (self.notes) |n| allocator.free(n);
+        memory.freeOptional(allocator, self.notes);
 
         for (self.fields) |*f| f.deinit(allocator);
         if (self.fields.len > 0) allocator.free(self.fields);
@@ -122,8 +122,7 @@ pub const TotpData = struct {
     period: u32 = 30,
 
     pub fn deinit(self: *TotpData, allocator: std.mem.Allocator) void {
-        @memset(@constCast(self.secret), 0);
-        allocator.free(self.secret);
+        memory.secureFree(allocator, self.secret);
     }
 };
 
@@ -164,13 +163,12 @@ pub const PasskeyData = struct {
 
     pub fn deinit(self: *PasskeyData, allocator: std.mem.Allocator) void {
         allocator.free(self.credential_id);
-        @memset(@constCast(self.private_key), 0);
-        allocator.free(self.private_key);
+        memory.secureFree(allocator, self.private_key);
         allocator.free(self.public_key);
         allocator.free(self.rp_id);
-        if (self.rp_name) |n| allocator.free(n);
+        memory.freeOptional(allocator, self.rp_name);
         allocator.free(self.user_handle);
-        if (self.user_name) |n| allocator.free(n);
+        memory.freeOptional(allocator, self.user_name);
     }
 };
 
@@ -182,11 +180,8 @@ pub const LoginData = struct {
     passkeys: []PasskeyData = &.{},
 
     pub fn deinit(self: *LoginData, allocator: std.mem.Allocator) void {
-        if (self.username) |u| allocator.free(u);
-        if (self.password) |p| {
-            @memset(@constCast(p), 0);
-            allocator.free(p);
-        }
+        memory.freeOptional(allocator, self.username);
+        memory.secureFree(allocator, self.password);
         for (self.uris) |*uri| uri.deinit(allocator);
         if (self.uris.len > 0) allocator.free(self.uris);
         if (self.totp) |*t| {
@@ -225,19 +220,10 @@ pub const CardData = struct {
     pin: ?[]const u8 = null,
 
     pub fn deinit(self: *CardData, allocator: std.mem.Allocator) void {
-        if (self.cardholder_name) |n| allocator.free(n);
-        if (self.number) |n| {
-            @memset(@constCast(n), 0);
-            allocator.free(n);
-        }
-        if (self.cvv) |c| {
-            @memset(@constCast(c), 0);
-            allocator.free(c);
-        }
-        if (self.pin) |p| {
-            @memset(@constCast(p), 0);
-            allocator.free(p);
-        }
+        memory.freeOptional(allocator, self.cardholder_name);
+        memory.secureFree(allocator, self.number);
+        memory.secureFree(allocator, self.cvv);
+        memory.secureFree(allocator, self.pin);
     }
 
     pub fn lastFour(self: *const CardData) ?[]const u8 {
@@ -257,12 +243,12 @@ pub const AddressData = struct {
     country: ?[]const u8 = null,
 
     pub fn deinit(self: *AddressData, allocator: std.mem.Allocator) void {
-        if (self.street1) |s| allocator.free(s);
-        if (self.street2) |s| allocator.free(s);
-        if (self.city) |c| allocator.free(c);
-        if (self.state) |s| allocator.free(s);
-        if (self.postal_code) |p| allocator.free(p);
-        if (self.country) |c| allocator.free(c);
+        memory.freeOptional(allocator, self.street1);
+        memory.freeOptional(allocator, self.street2);
+        memory.freeOptional(allocator, self.city);
+        memory.freeOptional(allocator, self.state);
+        memory.freeOptional(allocator, self.postal_code);
+        memory.freeOptional(allocator, self.country);
     }
 };
 
@@ -281,27 +267,21 @@ pub const IdentityData = struct {
     job_title: ?[]const u8 = null,
 
     pub fn deinit(self: *IdentityData, allocator: std.mem.Allocator) void {
-        if (self.title) |t| allocator.free(t);
-        if (self.first_name) |n| allocator.free(n);
-        if (self.middle_name) |n| allocator.free(n);
-        if (self.last_name) |n| allocator.free(n);
-        if (self.email) |e| allocator.free(e);
-        if (self.phone) |p| allocator.free(p);
+        memory.freeOptional(allocator, self.title);
+        memory.freeOptional(allocator, self.first_name);
+        memory.freeOptional(allocator, self.middle_name);
+        memory.freeOptional(allocator, self.last_name);
+        memory.freeOptional(allocator, self.email);
+        memory.freeOptional(allocator, self.phone);
         if (self.address) |*a| {
             var addr = a.*;
             addr.deinit(allocator);
         }
-        if (self.ssn) |s| {
-            @memset(@constCast(s), 0);
-            allocator.free(s);
-        }
-        if (self.passport) |p| {
-            @memset(@constCast(p), 0);
-            allocator.free(p);
-        }
-        if (self.license_number) |l| allocator.free(l);
-        if (self.company) |c| allocator.free(c);
-        if (self.job_title) |j| allocator.free(j);
+        memory.secureFree(allocator, self.ssn);
+        memory.secureFree(allocator, self.passport);
+        memory.freeOptional(allocator, self.license_number);
+        memory.freeOptional(allocator, self.company);
+        memory.freeOptional(allocator, self.job_title);
     }
 
     pub fn fullName(self: *const IdentityData, allocator: std.mem.Allocator) ![]const u8 {
@@ -331,14 +311,10 @@ pub const SshKeyData = struct {
     passphrase: ?[]const u8 = null,
 
     pub fn deinit(self: *SshKeyData, allocator: std.mem.Allocator) void {
-        @memset(@constCast(self.private_key), 0);
-        allocator.free(self.private_key);
+        memory.secureFree(allocator, self.private_key);
         allocator.free(self.public_key);
         allocator.free(self.fingerprint);
-        if (self.passphrase) |p| {
-            @memset(@constCast(p), 0);
-            allocator.free(p);
-        }
+        memory.secureFree(allocator, self.passphrase);
     }
 };
 
@@ -349,16 +325,10 @@ pub const ApiCredentialData = struct {
     documentation_url: ?[]const u8 = null,
 
     pub fn deinit(self: *ApiCredentialData, allocator: std.mem.Allocator) void {
-        if (self.api_key) |k| {
-            @memset(@constCast(k), 0);
-            allocator.free(k);
-        }
-        if (self.api_secret) |s| {
-            @memset(@constCast(s), 0);
-            allocator.free(s);
-        }
-        if (self.endpoint) |e| allocator.free(e);
-        if (self.documentation_url) |d| allocator.free(d);
+        memory.secureFree(allocator, self.api_key);
+        memory.secureFree(allocator, self.api_secret);
+        memory.freeOptional(allocator, self.endpoint);
+        memory.freeOptional(allocator, self.documentation_url);
     }
 };
 
@@ -385,18 +355,12 @@ pub const DatabaseData = struct {
     sid: ?[]const u8 = null,
 
     pub fn deinit(self: *DatabaseData, allocator: std.mem.Allocator) void {
-        if (self.host) |h| allocator.free(h);
-        if (self.database) |d| allocator.free(d);
-        if (self.username) |u| allocator.free(u);
-        if (self.password) |p| {
-            @memset(@constCast(p), 0);
-            allocator.free(p);
-        }
-        if (self.connection_string) |c| {
-            @memset(@constCast(c), 0);
-            allocator.free(c);
-        }
-        if (self.sid) |s| allocator.free(s);
+        memory.freeOptional(allocator, self.host);
+        memory.freeOptional(allocator, self.database);
+        memory.freeOptional(allocator, self.username);
+        memory.secureFree(allocator, self.password);
+        memory.secureFree(allocator, self.connection_string);
+        memory.freeOptional(allocator, self.sid);
     }
 };
 
@@ -416,10 +380,7 @@ pub const WifiData = struct {
 
     pub fn deinit(self: *WifiData, allocator: std.mem.Allocator) void {
         allocator.free(self.ssid);
-        if (self.password) |p| {
-            @memset(@constCast(p), 0);
-            allocator.free(p);
-        }
+        memory.secureFree(allocator, self.password);
     }
 };
 
@@ -433,14 +394,11 @@ pub const LicenseData = struct {
     expiration_date: ?i64 = null,
 
     pub fn deinit(self: *LicenseData, allocator: std.mem.Allocator) void {
-        if (self.license_key) |k| {
-            @memset(@constCast(k), 0);
-            allocator.free(k);
-        }
-        if (self.product_name) |p| allocator.free(p);
-        if (self.version) |v| allocator.free(v);
-        if (self.publisher) |p| allocator.free(p);
-        if (self.email) |e| allocator.free(e);
+        memory.secureFree(allocator, self.license_key);
+        memory.freeOptional(allocator, self.product_name);
+        memory.freeOptional(allocator, self.version);
+        memory.freeOptional(allocator, self.publisher);
+        memory.freeOptional(allocator, self.email);
     }
 };
 
