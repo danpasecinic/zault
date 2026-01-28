@@ -1,0 +1,617 @@
+const std = @import("std");
+const Uuid = @import("uuid.zig").Uuid;
+const memory = @import("../memory/secure_allocator.zig");
+
+pub const ItemType = enum(u8) {
+    login = 1,
+    secure_note = 2,
+    card = 3,
+    identity = 4,
+    ssh_key = 5,
+    api_credential = 6,
+    database = 7,
+    wifi = 8,
+    license = 9,
+};
+
+pub const FieldType = enum(u8) {
+    text = 0,
+    hidden = 1,
+    boolean = 2,
+    url = 3,
+    email = 4,
+    date = 5,
+    month_year = 6,
+    phone = 7,
+    totp = 8,
+    linked = 9,
+};
+
+pub const CustomField = struct {
+    name: []const u8,
+    value: ?[]const u8,
+    field_type: FieldType,
+
+    pub fn deinit(self: *CustomField, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        memory.freeOptional(allocator, self.value);
+    }
+};
+
+pub const PasswordHistoryEntry = struct {
+    password: []const u8,
+    changed_at: i64,
+
+    pub fn deinit(self: *PasswordHistoryEntry, allocator: std.mem.Allocator) void {
+        memory.secureFree(allocator, self.password);
+    }
+};
+
+pub const Item = struct {
+    id: Uuid,
+    name: []const u8,
+    notes: ?[]const u8,
+    item_type: ItemType,
+    data: ItemData,
+    favorite: bool,
+    fields: []CustomField,
+    password_history: []PasswordHistoryEntry,
+    created_at: i64,
+    modified_at: i64,
+    last_accessed_at: ?i64,
+    access_count: u32,
+    deleted_at: ?i64,
+
+    const Self = @This();
+
+    pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+        allocator.free(self.name);
+        memory.freeOptional(allocator, self.notes);
+
+        for (self.fields) |*f| f.deinit(allocator);
+        if (self.fields.len > 0) allocator.free(self.fields);
+
+        for (self.password_history) |*h| h.deinit(allocator);
+        if (self.password_history.len > 0) allocator.free(self.password_history);
+
+        self.data.deinit(allocator);
+    }
+
+    pub fn updateLastAccessed(self: *Self) void {
+        self.last_accessed_at = std.time.timestamp();
+        self.access_count += 1;
+    }
+};
+
+pub const ItemData = union(ItemType) {
+    login: LoginData,
+    secure_note: SecureNoteData,
+    card: CardData,
+    identity: IdentityData,
+    ssh_key: SshKeyData,
+    api_credential: ApiCredentialData,
+    database: DatabaseData,
+    wifi: WifiData,
+    license: LicenseData,
+
+    pub fn deinit(self: *ItemData, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .login => |*d| d.deinit(allocator),
+            .secure_note => {},
+            .card => |*d| d.deinit(allocator),
+            .identity => |*d| d.deinit(allocator),
+            .ssh_key => |*d| d.deinit(allocator),
+            .api_credential => |*d| d.deinit(allocator),
+            .database => |*d| d.deinit(allocator),
+            .wifi => |*d| d.deinit(allocator),
+            .license => |*d| d.deinit(allocator),
+        }
+    }
+};
+
+pub const TotpAlgorithm = enum(u8) {
+    sha1 = 1,
+    sha256 = 2,
+    sha512 = 3,
+};
+
+pub const TotpData = struct {
+    secret: []const u8,
+    algorithm: TotpAlgorithm = .sha1,
+    digits: u8 = 6,
+    period: u32 = 30,
+
+    pub fn deinit(self: *TotpData, allocator: std.mem.Allocator) void {
+        memory.secureFree(allocator, self.secret);
+    }
+};
+
+pub const UriMatchType = enum(u8) {
+    domain = 0,
+    host = 1,
+    starts_with = 2,
+    exact = 3,
+    regex = 4,
+    never = 5,
+};
+
+pub const Uri = struct {
+    uri: []const u8,
+    match_type: UriMatchType = .domain,
+
+    pub fn deinit(self: *Uri, allocator: std.mem.Allocator) void {
+        allocator.free(self.uri);
+    }
+};
+
+pub const PasskeyAlgorithm = enum(i32) {
+    es256 = -7,
+    ed25519 = -8,
+    rs256 = -257,
+};
+
+pub const PasskeyData = struct {
+    credential_id: []const u8,
+    private_key: []const u8,
+    public_key: []const u8,
+    algorithm: PasskeyAlgorithm,
+    rp_id: []const u8,
+    rp_name: ?[]const u8,
+    user_handle: []const u8,
+    user_name: ?[]const u8,
+    counter: u32,
+
+    pub fn deinit(self: *PasskeyData, allocator: std.mem.Allocator) void {
+        allocator.free(self.credential_id);
+        memory.secureFree(allocator, self.private_key);
+        allocator.free(self.public_key);
+        allocator.free(self.rp_id);
+        memory.freeOptional(allocator, self.rp_name);
+        allocator.free(self.user_handle);
+        memory.freeOptional(allocator, self.user_name);
+    }
+};
+
+pub const LoginData = struct {
+    username: ?[]const u8 = null,
+    password: ?[]const u8 = null,
+    uris: []Uri = &.{},
+    totp: ?TotpData = null,
+    passkeys: []PasskeyData = &.{},
+
+    pub fn deinit(self: *LoginData, allocator: std.mem.Allocator) void {
+        memory.freeOptional(allocator, self.username);
+        memory.secureFree(allocator, self.password);
+        for (self.uris) |*uri| uri.deinit(allocator);
+        if (self.uris.len > 0) allocator.free(self.uris);
+        if (self.totp) |*t| {
+            var totp = t.*;
+            totp.deinit(allocator);
+        }
+        for (self.passkeys) |*pk| pk.deinit(allocator);
+        if (self.passkeys.len > 0) allocator.free(self.passkeys);
+    }
+
+    pub fn hasTotp(self: *const LoginData) bool {
+        return self.totp != null;
+    }
+};
+
+pub const SecureNoteData = struct {};
+
+pub const CardBrand = enum(u8) {
+    visa = 1,
+    mastercard = 2,
+    amex = 3,
+    discover = 4,
+    diners = 5,
+    jcb = 6,
+    unionpay = 7,
+    other = 255,
+};
+
+pub const CardData = struct {
+    cardholder_name: ?[]const u8 = null,
+    number: ?[]const u8 = null,
+    brand: ?CardBrand = null,
+    exp_month: ?u8 = null,
+    exp_year: ?u16 = null,
+    cvv: ?[]const u8 = null,
+    pin: ?[]const u8 = null,
+
+    pub fn deinit(self: *CardData, allocator: std.mem.Allocator) void {
+        memory.freeOptional(allocator, self.cardholder_name);
+        memory.secureFree(allocator, self.number);
+        memory.secureFree(allocator, self.cvv);
+        memory.secureFree(allocator, self.pin);
+    }
+
+    pub fn lastFour(self: *const CardData) ?[]const u8 {
+        if (self.number) |n| {
+            if (n.len >= 4) return n[n.len - 4 ..];
+        }
+        return null;
+    }
+};
+
+pub const AddressData = struct {
+    street1: ?[]const u8 = null,
+    street2: ?[]const u8 = null,
+    city: ?[]const u8 = null,
+    state: ?[]const u8 = null,
+    postal_code: ?[]const u8 = null,
+    country: ?[]const u8 = null,
+
+    pub fn deinit(self: *AddressData, allocator: std.mem.Allocator) void {
+        memory.freeOptional(allocator, self.street1);
+        memory.freeOptional(allocator, self.street2);
+        memory.freeOptional(allocator, self.city);
+        memory.freeOptional(allocator, self.state);
+        memory.freeOptional(allocator, self.postal_code);
+        memory.freeOptional(allocator, self.country);
+    }
+};
+
+pub const IdentityData = struct {
+    title: ?[]const u8 = null,
+    first_name: ?[]const u8 = null,
+    middle_name: ?[]const u8 = null,
+    last_name: ?[]const u8 = null,
+    email: ?[]const u8 = null,
+    phone: ?[]const u8 = null,
+    address: ?AddressData = null,
+    ssn: ?[]const u8 = null,
+    passport: ?[]const u8 = null,
+    license_number: ?[]const u8 = null,
+    company: ?[]const u8 = null,
+    job_title: ?[]const u8 = null,
+
+    pub fn deinit(self: *IdentityData, allocator: std.mem.Allocator) void {
+        memory.freeOptional(allocator, self.title);
+        memory.freeOptional(allocator, self.first_name);
+        memory.freeOptional(allocator, self.middle_name);
+        memory.freeOptional(allocator, self.last_name);
+        memory.freeOptional(allocator, self.email);
+        memory.freeOptional(allocator, self.phone);
+        if (self.address) |*a| {
+            var addr = a.*;
+            addr.deinit(allocator);
+        }
+        memory.secureFree(allocator, self.ssn);
+        memory.secureFree(allocator, self.passport);
+        memory.freeOptional(allocator, self.license_number);
+        memory.freeOptional(allocator, self.company);
+        memory.freeOptional(allocator, self.job_title);
+    }
+
+    pub fn fullName(self: *const IdentityData, allocator: std.mem.Allocator) ![]const u8 {
+        var parts: std.ArrayList([]const u8) = .empty;
+        defer parts.deinit(allocator);
+
+        if (self.first_name) |n| try parts.append(allocator, n);
+        if (self.middle_name) |n| try parts.append(allocator, n);
+        if (self.last_name) |n| try parts.append(allocator, n);
+
+        return std.mem.join(allocator, " ", parts.items);
+    }
+};
+
+pub const SshKeyType = enum(u8) {
+    ed25519 = 1,
+    rsa = 2,
+    ecdsa = 3,
+    dsa = 4,
+};
+
+pub const SshKeyData = struct {
+    private_key: []const u8,
+    public_key: []const u8,
+    fingerprint: []const u8,
+    key_type: SshKeyType,
+    passphrase: ?[]const u8 = null,
+
+    pub fn deinit(self: *SshKeyData, allocator: std.mem.Allocator) void {
+        memory.secureFree(allocator, self.private_key);
+        allocator.free(self.public_key);
+        allocator.free(self.fingerprint);
+        memory.secureFree(allocator, self.passphrase);
+    }
+};
+
+pub const ApiCredentialData = struct {
+    api_key: ?[]const u8 = null,
+    api_secret: ?[]const u8 = null,
+    endpoint: ?[]const u8 = null,
+    documentation_url: ?[]const u8 = null,
+
+    pub fn deinit(self: *ApiCredentialData, allocator: std.mem.Allocator) void {
+        memory.secureFree(allocator, self.api_key);
+        memory.secureFree(allocator, self.api_secret);
+        memory.freeOptional(allocator, self.endpoint);
+        memory.freeOptional(allocator, self.documentation_url);
+    }
+};
+
+pub const DatabaseType = enum(u8) {
+    postgresql = 1,
+    mysql = 2,
+    mariadb = 3,
+    sqlite = 4,
+    mongodb = 5,
+    redis = 6,
+    oracle = 7,
+    sqlserver = 8,
+    other = 255,
+};
+
+pub const DatabaseData = struct {
+    db_type: DatabaseType = .postgresql,
+    host: ?[]const u8 = null,
+    port: ?u16 = null,
+    database: ?[]const u8 = null,
+    username: ?[]const u8 = null,
+    password: ?[]const u8 = null,
+    connection_string: ?[]const u8 = null,
+    sid: ?[]const u8 = null,
+
+    pub fn deinit(self: *DatabaseData, allocator: std.mem.Allocator) void {
+        memory.freeOptional(allocator, self.host);
+        memory.freeOptional(allocator, self.database);
+        memory.freeOptional(allocator, self.username);
+        memory.secureFree(allocator, self.password);
+        memory.secureFree(allocator, self.connection_string);
+        memory.freeOptional(allocator, self.sid);
+    }
+};
+
+pub const WifiSecurity = enum(u8) {
+    none = 0,
+    wep = 1,
+    wpa = 2,
+    wpa2 = 3,
+    wpa3 = 4,
+};
+
+pub const WifiData = struct {
+    ssid: []const u8,
+    password: ?[]const u8 = null,
+    security: WifiSecurity = .wpa2,
+    hidden: bool = false,
+
+    pub fn deinit(self: *WifiData, allocator: std.mem.Allocator) void {
+        allocator.free(self.ssid);
+        memory.secureFree(allocator, self.password);
+    }
+};
+
+pub const LicenseData = struct {
+    license_key: ?[]const u8 = null,
+    product_name: ?[]const u8 = null,
+    version: ?[]const u8 = null,
+    publisher: ?[]const u8 = null,
+    email: ?[]const u8 = null,
+    purchase_date: ?i64 = null,
+    expiration_date: ?i64 = null,
+
+    pub fn deinit(self: *LicenseData, allocator: std.mem.Allocator) void {
+        memory.secureFree(allocator, self.license_key);
+        memory.freeOptional(allocator, self.product_name);
+        memory.freeOptional(allocator, self.version);
+        memory.freeOptional(allocator, self.publisher);
+        memory.freeOptional(allocator, self.email);
+    }
+};
+
+pub fn createLoginItem(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    username: ?[]const u8,
+    password: ?[]const u8,
+    url: ?[]const u8,
+) !Item {
+    const now = std.time.timestamp();
+
+    const name_copy = try allocator.dupe(u8, name);
+    errdefer allocator.free(name_copy);
+
+    const username_copy = if (username) |u| try allocator.dupe(u8, u) else null;
+    errdefer if (username_copy) |u| allocator.free(u);
+
+    const password_copy = if (password) |p| try allocator.dupe(u8, p) else null;
+    errdefer if (password_copy) |p| allocator.free(p);
+
+    var uris: []Uri = &.{};
+    if (url) |u| {
+        const uri_copy = try allocator.dupe(u8, u);
+        errdefer allocator.free(uri_copy);
+
+        uris = try allocator.alloc(Uri, 1);
+        uris[0] = .{ .uri = uri_copy };
+    }
+
+    return Item{
+        .id = Uuid.generate(),
+        .name = name_copy,
+        .notes = null,
+        .item_type = .login,
+        .data = .{
+            .login = .{
+                .username = username_copy,
+                .password = password_copy,
+                .uris = uris,
+            },
+        },
+        .favorite = false,
+        .fields = &.{},
+        .password_history = &.{},
+        .created_at = now,
+        .modified_at = now,
+        .last_accessed_at = null,
+        .access_count = 0,
+        .deleted_at = null,
+    };
+}
+
+pub fn createSecureNoteItem(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    notes: []const u8,
+) !Item {
+    const now = std.time.timestamp();
+
+    const name_copy = try allocator.dupe(u8, name);
+    errdefer allocator.free(name_copy);
+
+    const notes_copy = try allocator.dupe(u8, notes);
+    errdefer allocator.free(notes_copy);
+
+    return Item{
+        .id = Uuid.generate(),
+        .name = name_copy,
+        .notes = notes_copy,
+        .item_type = .secure_note,
+        .data = .{ .secure_note = .{} },
+        .favorite = false,
+        .fields = &.{},
+        .password_history = &.{},
+        .created_at = now,
+        .modified_at = now,
+        .last_accessed_at = null,
+        .access_count = 0,
+        .deleted_at = null,
+    };
+}
+
+pub fn createCardItem(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    cardholder: ?[]const u8,
+    number: ?[]const u8,
+    exp_month: ?u8,
+    exp_year: ?u16,
+    cvv: ?[]const u8,
+) !Item {
+    const now = std.time.timestamp();
+
+    const name_copy = try allocator.dupe(u8, name);
+    errdefer allocator.free(name_copy);
+
+    const cardholder_copy = if (cardholder) |c| try allocator.dupe(u8, c) else null;
+    errdefer if (cardholder_copy) |c| allocator.free(c);
+
+    const number_copy = if (number) |n| try allocator.dupe(u8, n) else null;
+    errdefer if (number_copy) |n| allocator.free(n);
+
+    const cvv_copy = if (cvv) |c| try allocator.dupe(u8, c) else null;
+    errdefer if (cvv_copy) |c| allocator.free(c);
+
+    return Item{
+        .id = Uuid.generate(),
+        .name = name_copy,
+        .notes = null,
+        .item_type = .card,
+        .data = .{
+            .card = .{
+                .cardholder_name = cardholder_copy,
+                .number = number_copy,
+                .exp_month = exp_month,
+                .exp_year = exp_year,
+                .cvv = cvv_copy,
+            },
+        },
+        .favorite = false,
+        .fields = &.{},
+        .password_history = &.{},
+        .created_at = now,
+        .modified_at = now,
+        .last_accessed_at = null,
+        .access_count = 0,
+        .deleted_at = null,
+    };
+}
+
+test "item type enum values" {
+    try std.testing.expectEqual(@as(u8, 1), @intFromEnum(ItemType.login));
+    try std.testing.expectEqual(@as(u8, 9), @intFromEnum(ItemType.license));
+}
+
+test "field type enum values" {
+    try std.testing.expectEqual(@as(u8, 0), @intFromEnum(FieldType.text));
+    try std.testing.expectEqual(@as(u8, 1), @intFromEnum(FieldType.hidden));
+}
+
+test "login data deinit clears password" {
+    const allocator = std.testing.allocator;
+
+    var login = LoginData{
+        .username = try allocator.dupe(u8, "user"),
+        .password = try allocator.dupe(u8, "secret"),
+        .uris = &.{},
+        .totp = null,
+        .passkeys = &.{},
+    };
+
+    login.deinit(allocator);
+}
+
+test "card data deinit clears sensitive fields" {
+    const allocator = std.testing.allocator;
+
+    var card = CardData{
+        .cardholder_name = try allocator.dupe(u8, "John Doe"),
+        .number = try allocator.dupe(u8, "4111111111111111"),
+        .cvv = try allocator.dupe(u8, "123"),
+        .pin = try allocator.dupe(u8, "1234"),
+    };
+
+    card.deinit(allocator);
+}
+
+test "identity data full name" {
+    const identity = IdentityData{
+        .first_name = "John",
+        .middle_name = "Q",
+        .last_name = "Public",
+    };
+
+    const full = try identity.fullName(std.testing.allocator);
+    defer std.testing.allocator.free(full);
+    try std.testing.expectEqualStrings("John Q Public", full);
+}
+
+test "ssh key data deinit clears private key" {
+    const allocator = std.testing.allocator;
+
+    var ssh = SshKeyData{
+        .private_key = try allocator.dupe(u8, "PRIVATE"),
+        .public_key = try allocator.dupe(u8, "PUBLIC"),
+        .fingerprint = try allocator.dupe(u8, "SHA256:xxx"),
+        .key_type = .ed25519,
+        .passphrase = try allocator.dupe(u8, "secret"),
+    };
+
+    ssh.deinit(allocator);
+}
+
+test "wifi data deinit" {
+    const allocator = std.testing.allocator;
+
+    var wifi = WifiData{
+        .ssid = try allocator.dupe(u8, "MyNetwork"),
+        .password = try allocator.dupe(u8, "wifipass"),
+        .security = .wpa3,
+    };
+
+    wifi.deinit(allocator);
+}
+
+test "create login item" {
+    const allocator = std.testing.allocator;
+
+    var item = try createLoginItem(allocator, "github.com", "user", "pass", "https://github.com");
+    defer item.deinit(allocator);
+
+    try std.testing.expectEqualStrings("github.com", item.name);
+    try std.testing.expectEqual(ItemType.login, item.item_type);
+    try std.testing.expectEqualStrings("user", item.data.login.username.?);
+}

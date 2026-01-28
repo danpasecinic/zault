@@ -9,24 +9,24 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, _: config.Con
         return;
     }
 
-    const entry_name = args[0];
+    const item_name = args[0];
 
     var ctx = vault_helpers.openAndUnlock(allocator) catch return;
     defer ctx.deinit();
 
-    std.debug.print("Delete entry '{s}'? [y/N]: ", .{entry_name});
+    std.debug.print("Delete item '{s}'? [y/N]: ", .{item_name});
     if (!confirm()) {
         std.debug.print("Cancelled.\n", .{});
         return;
     }
 
-    ctx.vault.deleteEntry(entry_name) catch |err| {
+    ctx.vault.deleteItem(item_name) catch |err| {
         switch (err) {
-            core.VaultError.EntryNotFound => {
-                std.debug.print("Error: Entry '{s}' not found\n", .{entry_name});
+            core.VaultError.ItemNotFound => {
+                std.debug.print("Error: Item '{s}' not found\n", .{item_name});
             },
             else => {
-                std.debug.print("Error: Could not delete entry\n", .{});
+                std.debug.print("Error: Could not delete item\n", .{});
             },
         }
         return;
@@ -37,7 +37,7 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, _: config.Con
         return;
     };
 
-    std.debug.print("Entry '{s}' deleted.\n", .{entry_name});
+    std.debug.print("Item '{s}' deleted.\n", .{item_name});
 }
 
 fn confirm() bool {
